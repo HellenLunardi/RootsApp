@@ -1,0 +1,55 @@
+#:kivy 2.0
+
+<BookItem@MDBoxLayout>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: dp(180)
+    padding: dp(5)
+
+    on_release: app.save_book_to_database(self.book_id, self.title, self.authors, self.cover_url, self.page_count)
+
+    MDCard:
+        size_hint_y: None
+        height: dp(180)
+        
+        AsyncImage:
+            source: root.cover_url # Esta será a capa do livro
+            size_hint_y: 0.8
+
+        MDLabel:
+            id: book_title
+            text: root.title # Este será o titulo
+            haling: 'center'
+            size_hint_y: 0.2
+            shorten: True
+            shorten_from: 'right'
+
+ScreenManager:
+    MainScreen:
+
+<MainScreen>:
+    name: 'main_screen'
+    BoxLayout:
+        orientation: 'vertical'
+        MDBoxLayout:
+            adaptive_height: True
+            padding: dp(16)
+
+            MDTextField:
+                id: input_field
+                hint_text: "Adicione um livro..."
+                mode: "round"
+                on_text_validate: app.add_book_search(self.text)
+                on_focus: self.hint_text = "Adicione um livro..." if self.focus else ""
+                icon_right: "magnify"
+                icon_right_on_focus: "magnify"
+
+        ScrollView:
+            GridLayout:
+                id: books_grid
+                cols: 4
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(16)
+                spacing: dp(10)
+

@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS anotacoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     livro_id INTEGER,
     texto TEXT,
-    FOREIGN KEY (livro_id) REFERENCES livros(id)
+    FOREIGN KEY (livro_id) REFERENCES liros(id)
 )
 """)
 
