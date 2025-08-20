@@ -2,15 +2,16 @@ import requests
 import sqlite3
 import os.path
 
+from kivymd.uix.snackbar import Snackbar
 from kivymd.app import MDApp
 from kivy.lang import Builder
 from kivy.uix.screenmanager import Screen
 from kivy.properties import StringProperty, NumericProperty
-
+from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.uix.image import AsyncImage
 
-class BookItem(MDBoxLayout):
+class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
     cover_url = StringProperty('')
     book_id = StringProperty('')
@@ -145,13 +146,21 @@ class RootsApp(MDApp):
             conn.commit()
             print(f"Livro '{title}' salvo com sucesso!")
 
-            self.root.current = 'main_screen' # Retorna a tela inicial ao salvar um livro
+            # Limpa a tela de resultados
+            self.clear_books_grid()
+            Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
 
         except sqlite3.Error as e:
             print(f"Erro ao salvar livro: {e}")
         finally:
             conn.close()
-            
+
+    def clear_books_grid(self):
+        """
+        Limpa a grade de livros na tela principal
+        """
+        books_grid = self.root.get_screen('main_screen').ids.books_grid
+        books_grid.clear_widgets()            
 
 if __name__ == "__main__":
     RootsApp().run()
