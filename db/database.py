@@ -46,4 +46,7 @@ CREATE TABLE IF NOT EXISTS anotacoes (
 )
 """)
 
+cursor.execute("""
+ALTER TABLE livros ADD COLUMN cover_url TEXT""")
+
 conexao.commit()

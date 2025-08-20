@@ -26,14 +26,63 @@ class RootsApp(MDApp):
         self.initialize_database()
         return Builder.load_file("roots.kv")
     
-    def add_book_search(self, query):
+    def initialize_database(self):
         """
-        Cria as tabelas de livros, generos, progresso_diario e anotaçoes se elas nao existirem
+        Cria as tabelas de livros, generos, progresso_diario e anotacoes se elas não existirem.
         """
         if not os.path.exists("db"):
             os.makedirs("db")
-        conn = sqlite3.connect('db/roots.db')
+        conn = sqlite3.connect("db/roots.db")
         cursor = conn.cursor()
+
+        # Tabela de livros
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS livros (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL,
+                autor TEXT,
+                cover_url TEXT,
+                qtde_paginas INTEGER,
+                status TEXT CHECK(status IN ('Lendo', 'Concluído', 'Quero ler')) DEFAULT 'Quero ler',
+                pagina_atual INTEGER DEFAULT 0,
+                nota INTEGER DEFAULT 0,
+                genero_id INTEGER,
+                FOREIGN KEY (genero_id) REFERENCES generos(id)
+            )
+        """)
+
+        # Tabela de gêneros
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS generos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL UNIQUE
+            )
+        """)
+
+        # Tabela para o progresso de leitura diário
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS progresso_diario (
+                livro_id TEXT,
+                data TEXT,
+                paginas_lidas INTEGER,
+                FOREIGN KEY (livro_id) REFERENCES livros(id)
+            )
+        """)
+
+        # Tabela de anotações
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS anotacoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                livro_id TEXT,
+                texto TEXT,
+                FOREIGN KEY (livro_id) REFERENCES livros(id)
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+    
+    def add_book_search(self, query):
         """
         Busca livros na API e adiciona widgets na grade.
         Recebe o texto do campo de pesquisa como argumento.
@@ -71,7 +120,38 @@ class RootsApp(MDApp):
                 books_grid.add_widget(book_widget)
         else:
             print("Erro na busca da API")
+        
+    def save_book_to_database(self, book_id, title, authors, cover_url, page_count):
+        """
+        Salva um livro no banco de dados.
+        """
 
+        conn = sqlite3.connect('db/roots.db')
+        cursor = conn.cursor()
+
+        # Garante que a quantidade de paginas seja um inteiro
+        try:
+            page_count = int(page_count)
+        except (ValueError, TypeError):
+            page_count = 0 # Define um valor padrão se a conversão falhar
+
+        try:
+            # Note a correspondencia entre variaveis e as colunas do seu banco
+            cursor.execute("""
+                INSERT OR REPLACE INTO livros (
+                    id, nome, autor, cover_url, qtde_paginas, status, pagina_atual, nota, genero_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (book_id, title, authors, cover_url, page_count, 'Quero ler', 0, 0, None))
+            conn.commit()
+            print(f"Livro '{title}' salvo com sucesso!")
+
+            self.root.current = 'main_screen' # Retorna a tela inicial ao salvar um livro
+
+        except sqlite3.Error as e:
+            print(f"Erro ao salvar livro: {e}")
+        finally:
+            conn.close()
+            
 
 if __name__ == "__main__":
     RootsApp().run()

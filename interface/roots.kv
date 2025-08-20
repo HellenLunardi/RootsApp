@@ -1,28 +1,35 @@
 #:kivy 2.0
 
-<BookItem@MDBoxLayout>:
+<BookItem>:
     orientation: 'vertical'
     size_hint_y: None
     height: dp(180)
     padding: dp(5)
 
-    on_release: app.save_book_to_database(self.book_id, self.title, self.authors, self.cover_url, self.page_count)
-
     MDCard:
-        size_hint_y: None
-        height: dp(180)
-        
+        orientation: 'vertical'
+        size: dp(150), dp(180)
+        ripple_behavior: True
+
+        on_release: app.save_book_to_database(root.book_id, root.title, root.authors, root.cover_url, root.page_count)
+
+        BoxLayout:
+            orientation: 'vertical'
+            padding: dp(5)
+            spacing: dp(5)            
+
         AsyncImage:
             source: root.cover_url # Esta será a capa do livro
             size_hint_y: 0.8
 
         MDLabel:
-            id: book_title
             text: root.title # Este será o titulo
-            haling: 'center'
+            halign: 'center'
             size_hint_y: 0.2
             shorten: True
             shorten_from: 'right'
+            font_style: 'Body2'
+            color: 0, 0, 0, 1
 
 ScreenManager:
     MainScreen:
