@@ -9,25 +9,33 @@
     spacing: dp(6)
     on_release: app.open_book_detail(root.book_id, root.title, root.authors, root.cover_url, root.page_count, root.description)
     ripple_behavior: True
-    
+
     canvas.before:
         Color:
             rgba: 0.95, 0.95, 0.95, 1
         RoundedRectangle:
             size: self.size
-            pos:self.pos
+            pos: self.pos
             radius: [10,]
 
-    AsyncImage:
-        source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
+    FloatLayout:
         size_hint_y: None
         height: dp(140)
-        allow_stretch: True
-        keep_ratio: True
 
+        AsyncImage:
+            source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
+            size_hint: 1, 1
+            pos_hint: {"x": 0, "y": 0}
+
+        MDIconButton:
+            icon: "delete"
+            pos_hint: {"right": 1, "top": 1}
+            opacity: 1 if root.removable else 0
+            disabled: not root.removable
+            on_release: app.delete_book(root.book_id, root.title)
 
     MDLabel:
-        text: root.title # Este será o titulo
+        text: root.title
         halign: 'center'
         theme_text_color: "Primary"
         size_hint_y: None
@@ -37,8 +45,11 @@
         max_lines: 2
         ellipsize: "end"
 
+
 ScreenManager:
     MainScreen:
+    GraphScreen:
+    NotesScreen:
     BookDetailScreen:
 
 <MainScreen>:
@@ -49,7 +60,7 @@ ScreenManager:
         MDTopAppBar:
             title: "Roots"
             elevation: 4
-            left_action_items: [["arrow-left", lambda x: app.clear_books_grid()]]
+            left_action_items: [["arrow-left", lambda x: app.on_back_from_search()]] if root.show_back else []
 
         MDBoxLayout:
             adaptive_height: True
@@ -58,11 +69,9 @@ ScreenManager:
             MDTextField:
                 id: input_field
                 hint_text: "Adicione um livro..."
-                mode: "round"
+                mode: "rectangle"
                 on_text_validate: app.add_book_search(self.text)
-                on_focus: self.hint_text = "Adicione um livro..." if self.focus else ""
-                icon_right: "magnify"
-                icon_right_on_focus: "magnify"
+                size_hint_x: 1
 
         ScrollView:
             GridLayout:
@@ -72,6 +81,86 @@ ScreenManager:
                 padding: dp(16)
                 spacing: dp(10)
                 height: self.minimum_height
+
+        # ---- Rodapé com 2 botões ----
+        MDBoxLayout:
+            size_hint_y: None
+            height: dp(64)
+            padding: dp(12)
+            spacing: dp(12)
+
+            MDRaisedButton:
+                text: "Gráfico de leitura"
+                icon: "chart-line"
+                on_release: app.go_graph()
+                md_bg_color: app.theme_cls.primary_color
+                text_color: 1,1,1,1
+
+            MDRaisedButton:
+                text: "Anotações"
+                icon: "notebook"
+                on_release: app.go_notes()
+                md_bg_color: app.theme_cls.primary_color
+                text_color: 1,1,1,1
+
+
+<GraphScreen>:
+    name: 'graph_screen'
+    BoxLayout:
+        orientation: 'vertical'
+
+        MDTopAppBar:
+            title: "Gráfico de leitura"
+            elevation: 4
+            left_action_items: [["arrow-left", lambda x: app.go_home()]]
+
+        MDBoxLayout:
+            id: chart_box
+            padding: dp(16)
+            spacing: dp(8)
+            orientation: 'vertical'
+
+
+<NotesScreen>:
+    name: 'notes_screen'
+    notes_book_id: ""
+    notes_book_title: "Selecionar livro"
+
+    BoxLayout:
+        orientation: 'vertical'
+
+        MDTopAppBar:
+            title: "Anotações"
+            elevation: 4
+            left_action_items: [["arrow-left", lambda x: app.go_home()]]
+
+        MDBoxLayout:
+            padding: dp(16)
+            spacing: dp(8)
+            orientation: 'vertical'
+
+            MDBoxLayout:
+                adaptive_height: True
+                spacing: dp(8)
+
+                MDRaisedButton:
+                    id: book_select_btn
+                    text: root.notes_book_title
+                    on_release: app.open_book_picker()
+
+                MDTextField:
+                    id: note_input
+                    hint_text: "Escreva uma anotação..."
+                    multiline: True
+                    size_hint_x: 1
+
+                MDRaisedButton:
+                    text: "Salvar"
+                    on_release: app.save_note_from_ui()
+
+            ScrollView:
+                MDList:
+                    id: notes_list
 
 
 <BookDetailScreen>:
@@ -95,8 +184,6 @@ ScreenManager:
                     source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
                     size_hint_y: None
                     height: dp(220)
-                    allow_stretch: True
-                    keep_ratio: True
 
                 MDLabel:
                     text: root.book_title
@@ -128,4 +215,8 @@ ScreenManager:
                 MDRaisedButton:
                     text: "Adicionar"
                     pos_hint: {"center_x": 0.5}
+                    size_hint_y: None
+                    height: dp(0) if root.already_added else dp(48)
+                    opacity: 0 if root.already_added else 1
+                    disabled: root.already_added
                     on_release: app.save_from_detail()
