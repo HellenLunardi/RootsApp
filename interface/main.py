@@ -3,9 +3,10 @@ import sqlite3
 import os.path
 import re
 import html
+from kivy.clock import Clock
+from kivymd.toast import toast
 from kivy.network.urlrequest import UrlRequest
 from urllib.parse import quote_plus
-from kivymd.uix.snackbar import Snackbar
 from kivymd.app import MDApp
 from kivy.lang import Builder
 from kivy.uix.screenmanager import Screen
@@ -34,6 +35,37 @@ class BookDetailScreen(Screen):
     description = StringProperty('')
 
 class RootsApp(MDApp):
+
+    def save_from_detail(self):
+        """Chamada pelo botão 'Adicionar' na tela de detalhes, com proteção."""
+        def _do_save(*_):
+            try:
+                detail = self.root.get_screen('detail_screen')
+                ok = self.save_book_to_database(
+                    detail.book_id,
+                    detail.book_title,
+                    detail.authors,
+                    detail.cover_url,
+                    detail.page_count,
+                    detail.description or ''
+                )
+                if ok:
+                    self.notify(f"'{detail.book_title}' adicionado à sua lista!")
+                    self.go_home()
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                self.notify(f"Falha ao adicionar: {e}")
+
+        Clock.schedule_once(_do_save, 0)
+                
+
+    def notify(self, msg:str):
+        try:
+            toast(msg)
+        except Exception:
+            print(msg)
+
+        
     @staticmethod
     def _normalize_text(s: str) -> str:
         s = (s or "").lower().strip()
@@ -134,7 +166,7 @@ class RootsApp(MDApp):
 
         q = (query or "").strip()
         if not q:
-            Snackbar(text="Digite algo para buscar.").open()
+            self.notify("Digite algo para buscar.")
             return
         
         """
@@ -193,11 +225,11 @@ class RootsApp(MDApp):
                 ))
 
             if not books_grid.children:
-                Snackbar(text="Nada encontrado.").open()
+                self.notify("Nada encontrado.")
 
         def fail(req, err):
             print("Erro na busca:", err)
-            Snackbar(text="Erro ao buscar livros, Verifique sua conexão.").open()
+            self.notify("Erro ao buscar livros, Verifique sua conexão.")
 
         UrlRequest(api_url, on_success=ok, on_error=fail, on_failure=fail, decode=True)
 
@@ -209,9 +241,6 @@ class RootsApp(MDApp):
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
-        self.clear_books_grid()
-        Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
 
         try:
             if self.root.current == 'detail_screen':
@@ -236,14 +265,8 @@ class RootsApp(MDApp):
             print(f"Livro '{title}' salvo com sucesso!")
 
             # Limpa a tela de resultados
-            self.clear_books_grid()
-            Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
-
-            try:
-                if self.root.current == 'detail_screen':
-                    self.go_home()
-            except Exception:
-                pass
+            self.load_saved_books()
+            self.notify(f"'{title}' adicionado à sua lista!")
 
             return True
         except sqlite3.Error as e:
@@ -259,7 +282,34 @@ class RootsApp(MDApp):
         books_grid = self.root.get_screen('main_screen').ids.books_grid
         books_grid.clear_widgets()      
 
-    
+    def on_start(self):
+        self.load_saved_books()
+
+    def load_saved_books(self):
+        """Preenche a grade com livros já salvos no banco"""
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, nome, autor, cover_url, COALESCE(qtde_paginas,0), COALESCE(descricao,'')
+            FROM livros
+            ORDER BY rowid DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+
+        grid = self.root.get_screen('main_screen').ids.books_grid
+        grid.clear_widgets()
+        for book_id, title, authors, cover_url, page_count, description in rows:
+            grid.add_widget(BookItem(
+                book_id=book_id,
+                title=title,
+                authors=authors,
+                cover_url=cover_url,
+                page_count=page_count,
+                description=description
+            ))
 
 if __name__ == "__main__":
     RootsApp().run()

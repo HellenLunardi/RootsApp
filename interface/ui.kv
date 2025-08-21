@@ -128,5 +128,4 @@ ScreenManager:
                 MDRaisedButton:
                     text: "Adicionar"
                     pos_hint: {"center_x": 0.5}
-                    on_release:
-                        app.save_book_to_database(root.book_id, root.book_title, root.authors, root.cover_url, root.page_count, root.description)
+                    on_release: app.save_from_detail()
