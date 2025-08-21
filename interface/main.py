@@ -2,6 +2,7 @@ import requests
 import sqlite3
 import os.path
 import re
+import html
 from kivy.network.urlrequest import UrlRequest
 from urllib.parse import quote_plus
 from kivymd.uix.snackbar import Snackbar
@@ -12,7 +13,6 @@ from kivy.properties import StringProperty, NumericProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.uix.image import AsyncImage
-from kivy.network.urlrequest import UrlRequest
 
 class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
@@ -20,9 +20,18 @@ class BookItem(ButtonBehavior, MDBoxLayout):
     book_id = StringProperty('')
     authors = StringProperty('')
     page_count = NumericProperty(0)
+    description = StringProperty('')
 
 class MainScreen(Screen):
     pass
+
+class BookDetailScreen(Screen):
+    book_id = StringProperty('')
+    book_title = StringProperty('')
+    authors = StringProperty('')
+    cover_url = StringProperty('')
+    page_count = NumericProperty(0)
+    description = StringProperty('')
 
 class RootsApp(MDApp):
     @staticmethod
@@ -32,19 +41,24 @@ class RootsApp(MDApp):
         s = re.sub(r"\s+", " ", s)
         return s
     
+    @staticmethod
+    def clean_description(s: str) -> str:
+        s = s or ''
+        s = re.sub(r'<[^>]+>', '', s)
+        return html.unescape(s).strip()
+    
     def build(self):
         # Chama a funçao para inicializar o banco de dados
         self.initialize_database()
-        kv_path = os.path.join(os.path.dirname(__file__), "interface", "ui.kv")
-        return Builder.load_file("ui.kv")
+        return Builder.load_file('ui.kv')
     
     def initialize_database(self):
         """
         Cria as tabelas de livros, generos, progresso_diario e anotacoes se elas não existirem.
         """
-        if not os.path.exists("db"):
-            os.makedirs("db")
-        conn = sqlite3.connect("db/roots.db")
+        db_dir = os.path.join(self.user_data_dir, "db")
+        os.makedirs(db_dir, exist_ok=True)
+        conn = sqlite3.connect(os.path.join(db_dir, "roots.db"))
         cursor = conn.cursor()
 
         # Tabela de livros
@@ -91,9 +105,26 @@ class RootsApp(MDApp):
             )
         """)
 
+        cursor.execute("PRAGMA table_info(livros)")
+        cols = [r[1] for r in cursor.fetchall()]
+        if 'descricao' not in cols:
+            cursor.execute("""ALTER TABLE livros ADD COLUMN descricao TEXT""")
+
         conn.commit()
         conn.close()
     
+    def open_book_detail(self, book_id, title, authors, cover_url, page_count, description=''):
+        detail = self.root.get_screen('detail_screen')
+        detail.book_id = book_id
+        detail.book_title = title
+        detail.authors = authors
+        detail.cover_url = cover_url
+        detail.page_count = page_count
+        detail.description = description or ''
+        self.root.current = 'detail_screen'
+
+    def go_home(self):
+        self.root.current = 'main_screen'
 
 
     def add_book_search(self, query):
@@ -104,6 +135,8 @@ class RootsApp(MDApp):
         q = (query or "").strip()
         if not q:
             Snackbar(text="Digite algo para buscar.").open()
+            return
+        
         """
         Busca livros na API e adiciona widgets na grade.
         Recebe o texto do campo de pesquisa como argumento.
@@ -117,6 +150,7 @@ class RootsApp(MDApp):
             "&langRestrict=pt"
         )
 
+        
         seen_ids = set()
         seen_title_author = set()
 
@@ -131,6 +165,8 @@ class RootsApp(MDApp):
                 authors = ', '.join(authors_list)
                 cover_url = volume_info.get('imageLinks', {}).get('thumbnail', '') or ""
                 page_count = volume_info.get('pageCount', 0) or 0
+                raw_desc = volume_info.get('description', '') or ''
+                description = self.clean_description(raw_desc)
 
                 # Cria uma instancia do widget BookItem com as infos correta
 
@@ -152,7 +188,8 @@ class RootsApp(MDApp):
                     title=title,
                     authors=authors,
                     cover_url=cover_url,
-                    page_count=page_count
+                    page_count=page_count,
+                    description=description,
                 ))
 
             if not books_grid.children:
@@ -164,14 +201,23 @@ class RootsApp(MDApp):
 
         UrlRequest(api_url, on_success=ok, on_error=fail, on_failure=fail, decode=True)
 
-    def save_book_to_database(self, book_id, title, authors, cover_url, page_count):
+    def save_book_to_database(self, book_id, title, authors, cover_url, page_count, description=''):
         """
         Salva um livro no banco de dados.
         """
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        conn = sqlite3.connect('db/roots.db')
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+
+        self.clear_books_grid()
+        Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
+
+        try:
+            if self.root.current == 'detail_screen':
+                self.go_home()
+        except Exception:
+            pass
 
         # Garante que a quantidade de paginas seja um inteiro
         try:
@@ -183,15 +229,22 @@ class RootsApp(MDApp):
             # Note a correspondencia entre variaveis e as colunas do seu banco
             cursor.execute("""
                 INSERT OR IGNORE INTO livros (
-                    id, nome, autor, cover_url, qtde_paginas, status, pagina_atual, nota, genero_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (book_id, title, authors, cover_url, page_count, 'Quero ler', 0, 0, None))
+                    id, nome, autor, cover_url, qtde_paginas, status, pagina_atual, nota, genero_id, descricao
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (book_id, title, authors, cover_url, page_count, 'Quero ler', 0, 0, None, description))
             conn.commit()
             print(f"Livro '{title}' salvo com sucesso!")
 
             # Limpa a tela de resultados
             self.clear_books_grid()
             Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
+
+            try:
+                if self.root.current == 'detail_screen':
+                    self.go_home()
+            except Exception:
+                pass
+
             return True
         except sqlite3.Error as e:
             print(f"Erro ao salvar livro: {e}")
@@ -204,7 +257,9 @@ class RootsApp(MDApp):
         Limpa a grade de livros na tela principal
         """
         books_grid = self.root.get_screen('main_screen').ids.books_grid
-        books_grid.clear_widgets()            
+        books_grid.clear_widgets()      
+
+    
 
 if __name__ == "__main__":
     RootsApp().run()

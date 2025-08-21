@@ -7,7 +7,7 @@
     height: self.minimum_height
     padding: dp(8)
     spacing: dp(6)
-    on_release: app.save_book_to_database(root.book_id, root.title, root.authors, root.cover_url, root.page_count)
+    on_release: app.open_book_detail(root.book_id, root.title, root.authors, root.cover_url, root.page_count, root.description)
     ripple_behavior: True
     
     canvas.before:
@@ -39,6 +39,7 @@
 
 ScreenManager:
     MainScreen:
+    BookDetailScreen:
 
 <MainScreen>:
     name: 'main_screen'
@@ -72,3 +73,60 @@ ScreenManager:
                 spacing: dp(10)
                 height: self.minimum_height
 
+
+<BookDetailScreen>:
+    name: 'detail_screen'
+    BoxLayout:
+        orientation: 'vertical'
+
+        MDTopAppBar:
+            title: "Detalhes do livro"
+            elevation: 4
+            left_action_items: [["arrow-left", lambda x: app.go_home()]]
+
+        ScrollView:
+            MDBoxLayout:
+                orientation: 'vertical'
+                padding: dp(16)
+                spacing: dp(12)
+                adaptive_height: True
+
+                AsyncImage:
+                    source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
+                    size_hint_y: None
+                    height: dp(220)
+                    allow_stretch: True
+                    keep_ratio: True
+
+                MDLabel:
+                    text: root.book_title
+                    font_style: "H1"
+                    halign: "center"
+                    size_hint_y: None
+                    text_size: self.width, None
+                    height: self.texture_size[1]
+
+                MDLabel:
+                    text: root.authors
+                    theme_text_color: "Secondary"
+                    halign: "center"
+                    size_hint_y: None
+                    text_size: self.width, None
+                    height: self.texture_size[1]
+
+                MDLabel:
+                    text: f"{root.page_count} páginas" if root.page_count else ""
+                    halign: "center"
+                    size_hint_y: None
+                    text_size: self.width, None
+                    height: self.texture_size[1]
+
+                Widget:
+                    size_hint_y: None
+                    height: dp(8)
+
+                MDRaisedButton:
+                    text: "Adicionar"
+                    pos_hint: {"center_x": 0.5}
+                    on_release:
+                        app.save_book_to_database(root.book_id, root.book_title, root.authors, root.cover_url, root.page_count, root.description)
