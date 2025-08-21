@@ -4,40 +4,38 @@
 <BookItem>:
     orientation: 'vertical'
     size_hint_y: None
-    height: dp(180)
-    padding: dp(5)
-
-    on_release: app.save_book_and_clear(root.book_id, root.title, root.authors, root.cover_url, root.page_count)
+    height: self.minimum_height
+    padding: dp(8)
+    spacing: dp(6)
+    on_release: app.save_book_to_database(root.book_id, root.title, root.authors, root.cover_url, root.page_count)
     ripple_behavior: True
     
     canvas.before:
         Color:
-            rgba: 0.9, 0.9, 0.9, 1
+            rgba: 0.95, 0.95, 0.95, 1
         RoundedRectangle:
             size: self.size
             pos:self.pos
             radius: [10,]
 
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(5)
-        spacing: dp(5)            
+    AsyncImage:
+        source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
+        size_hint_y: None
+        height: dp(140)
+        allow_stretch: True
+        keep_ratio: True
 
-        AsyncImage:
-            source: root.cover_url # Esta será a capa do livro
-            size_hint_y: 1
-            size_hint_x: 0.8
-            allow_stretch: True
-            keep_ratio: False
 
-        MDLabel:
-            text: root.title # Este será o titulo
-            halign: 'center'
-            size_hint_y: 0.2
-            shorten: True
-            shorten_from: 'right'
-            font_style: 'Body2'
-            color: 0, 0, 0, 1
+    MDLabel:
+        text: root.title # Este será o titulo
+        halign: 'center'
+        theme_text_color: "Primary"
+        size_hint_y: None
+        height: self.texture_size[1] + dp(10)
+        font_style: "Caption"
+        shorten: True
+        max_lines: 2
+        ellipsize: "end"
 
 ScreenManager:
     MainScreen:
@@ -49,7 +47,7 @@ ScreenManager:
 
         MDTopAppBar:
             title: "Roots"
-            elevetion: 4
+            elevation: 4
             left_action_items: [["arrow-left", lambda x: app.clear_books_grid()]]
 
         MDBoxLayout:
@@ -68,9 +66,9 @@ ScreenManager:
         ScrollView:
             GridLayout:
                 id: books_grid
-                cols: 4
+                cols: 2
                 size_hint_y: None
-                height: self.minimum_height
                 padding: dp(16)
                 spacing: dp(10)
+                height: self.minimum_height
 

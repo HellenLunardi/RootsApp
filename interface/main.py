@@ -1,7 +1,9 @@
 import requests
 import sqlite3
 import os.path
-
+import re
+from kivy.network.urlrequest import UrlRequest
+from urllib.parse import quote_plus
 from kivymd.uix.snackbar import Snackbar
 from kivymd.app import MDApp
 from kivy.lang import Builder
@@ -10,6 +12,7 @@ from kivy.properties import StringProperty, NumericProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.uix.image import AsyncImage
+from kivy.network.urlrequest import UrlRequest
 
 class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
@@ -22,10 +25,18 @@ class MainScreen(Screen):
     pass
 
 class RootsApp(MDApp):
+    @staticmethod
+    def _normalize_text(s: str) -> str:
+        s = (s or "").lower().strip()
+        s = re.sub(r"[\s\-\_\.\,\:\;\!\?\(\)\[\]\{\}]+", " ", s)
+        s = re.sub(r"\s+", " ", s)
+        return s
+    
     def build(self):
         # Chama a funçao para inicializar o banco de dados
         self.initialize_database()
-        return Builder.load_file("roots.kv")
+        kv_path = os.path.join(os.path.dirname(__file__), "interface", "ui.kv")
+        return Builder.load_file("ui.kv")
     
     def initialize_database(self):
         """
@@ -83,63 +94,95 @@ class RootsApp(MDApp):
         conn.commit()
         conn.close()
     
+
+
     def add_book_search(self, query):
+        sm = self.root.get_screen('main_screen')
+        books_grid = sm.ids.books_grid
+        books_grid.clear_widgets() # limpa a grade antes de adicionar o novo livro
+
+        q = (query or "").strip()
+        if not q:
+            Snackbar(text="Digite algo para buscar.").open()
         """
         Busca livros na API e adiciona widgets na grade.
         Recebe o texto do campo de pesquisa como argumento.
         """
-        api_url = f"https://www.googleapis.com/books/v1/volumes?q={query}"
-        response = requests.get(api_url)
+        api_url = (
+            "https://www.googleapis.com/books/v1/volumes"
+            f"?q={quote_plus(q)}"
+            "&printType=books"
+            "&orderBy=relevance"
+            "&maxResults=30"
+            "&langRestrict=pt"
+        )
 
-        books_grid = self.root.get_screen('main_screen').ids.books_grid
-        books_grid.clear_widgets() # limpa a grade antes de adicionar o novo livro
+        seen_ids = set()
+        seen_title_author = set()
 
-
-        if response.status_code == 200:
-            books_data = response.json().get('items', [])
-
-            for item in books_data:
-                volume_info = item.get('volumeInfo', {})
-
+        def ok(req, result):
+            items = result.get('items', [])
+            for item in items:
+                volume_info = item.get('volumeInfo', {}) or {}
                 # Coleta todas as informações necessárias do livro
                 book_id = item.get('id', '')
-                title = volume_info.get('title', 'Título Desconhecido')
+                title = volume_info.get('title', 'Título Desconhecido') or ""
                 authors_list = volume_info.get('authors', ['Autor Desconhecido'])
                 authors = ', '.join(authors_list)
-                cover_url = volume_info.get('imageLinks', {}).get('thumbnail', '')
-                page_count = volume_info.get('pageCount', 0)
+                cover_url = volume_info.get('imageLinks', {}).get('thumbnail', '') or ""
+                page_count = volume_info.get('pageCount', 0) or 0
 
-                # Cria uma instancia do widget BookItem com as infos corretas
-                book_widget = BookItem(
+                # Cria uma instancia do widget BookItem com as infos correta
+
+                if book_id and book_id in seen_ids:
+                    continue
+
+                ta_key = f"{self._normalize_text(title)}|{self._normalize_text(authors)}"
+                if ta_key in seen_title_author:
+                    continue
+
+                if not cover_url: continue
+
+                if book_id:
+                    seen_ids.add(book_id)
+                seen_title_author.add(ta_key)
+
+                books_grid.add_widget(BookItem(
                     book_id=book_id,
                     title=title,
                     authors=authors,
                     cover_url=cover_url,
                     page_count=page_count
-                )
+                ))
 
-                books_grid.add_widget(book_widget)
-        else:
-            print("Erro na busca da API")
-        
+            if not books_grid.children:
+                Snackbar(text="Nada encontrado.").open()
+
+        def fail(req, err):
+            print("Erro na busca:", err)
+            Snackbar(text="Erro ao buscar livros, Verifique sua conexão.").open()
+
+        UrlRequest(api_url, on_success=ok, on_error=fail, on_failure=fail, decode=True)
+
     def save_book_to_database(self, book_id, title, authors, cover_url, page_count):
         """
         Salva um livro no banco de dados.
         """
-
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
         conn = sqlite3.connect('db/roots.db')
         cursor = conn.cursor()
 
         # Garante que a quantidade de paginas seja um inteiro
         try:
-            page_count = int(page_count)
+            page_count = int(page_count) if page_count is not None else 0
         except (ValueError, TypeError):
             page_count = 0 # Define um valor padrão se a conversão falhar
 
         try:
             # Note a correspondencia entre variaveis e as colunas do seu banco
             cursor.execute("""
-                INSERT OR REPLACE INTO livros (
+                INSERT OR IGNORE INTO livros (
                     id, nome, autor, cover_url, qtde_paginas, status, pagina_atual, nota, genero_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (book_id, title, authors, cover_url, page_count, 'Quero ler', 0, 0, None))
@@ -149,9 +192,10 @@ class RootsApp(MDApp):
             # Limpa a tela de resultados
             self.clear_books_grid()
             Snackbar(text=f"'{title}' adicionado à sua lista!", snackbar_x="10dp", snackbar_y="10dp", size_hint_x=.9).open()
-
+            return True
         except sqlite3.Error as e:
             print(f"Erro ao salvar livro: {e}")
+            return False
         finally:
             conn.close()
 
