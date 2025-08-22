@@ -3,11 +3,13 @@ import os.path
 import re
 import html
 from datetime import date, timedelta
-
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty, OptionProperty
 from kivy.clock import Clock
 from kivy.network.urlrequest import UrlRequest
 from urllib.parse import quote_plus
-
+from kivymd.uix.dialog import MDDialog
+from kivymd.uix.button import MDFlatButton
+from kivymd.uix.textfield import MDTextField
 from kivymd.toast import toast
 from kivymd.app import MDApp
 from kivy.lang import Builder
@@ -56,6 +58,12 @@ class BookDetailScreen(Screen):
     page_count = NumericProperty(0)
     description = StringProperty('')
     already_added = BooleanProperty(False)
+    pages_read = NumericProperty(0)
+    book_status = OptionProperty(
+        'Quero ler',
+        options=('Quero ler', 'Lendo', 'Concluído')
+    )
+    progress_percent = NumericProperty(0)
 
 
 class RootsApp(MDApp):
@@ -185,6 +193,28 @@ class RootsApp(MDApp):
         detail.page_count = page_count
         detail.description = description or ''
         detail.already_added = self.is_book_saved(book_id, title, authors)
+
+        if detail.already_added:
+            db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COALESCE(pagina_atual,0), COALESCE(status,'Quero ler'), COALESCE(qtde_paginas,0)
+                FROM livros WHERE id = ?
+            """, (book_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                detail.pages_read = int(row[0] or 0)
+                detail.book_status = row[1] or 'Quero ler'
+                if (row[2] or 0) > 0:
+                    detail.page_count = int(row[2] or detail.page_count)
+        else:
+            detail.pages_read = 0
+            detail.book_status = 'Quero ler'
+
+        self._refresh_detail_progress()
+        
         self.root.current = 'detail_screen'
         self.root.get_screen('main_screen').show_back = False
 
@@ -494,6 +524,177 @@ class RootsApp(MDApp):
         from kivymd.uix.list import TwoLineListItem
         for _id, book_title, text in rows:
             lst.add_widget(TwoLineListItem(text=book_title, secondary_text=(text or "")[:120]))
+
+        # ------------------ STATUS ------------------
+
+    def status_db_to_ui(self, s: str) -> str:
+        # DB → UI
+        m = {"Concluído": "Lido", "Lendo": "Lendo", "Quero ler": "Quero ler"}
+        return m.get((s or "").strip(), "Quero ler")
+
+    def status_ui_to_db(self, s: str) -> str:
+        # UI → DB
+        m = {"Lido": "Concluído", "Lendo": "Lendo", "Quero ler": "Quero ler"}
+        return m.get((s or "").strip(), "Quero ler")
+
+    # Para usar no KV (comparações)
+    def status_ui(self, status_db: str) -> str:
+        return self.status_db_to_ui(status_db)
+    
+    def set_status_from_ui(self, ui_status: str):
+        """Usuário escolheu 'Quero ler' | 'Lendo' | 'Lido' na UI."""
+        detail = self.root.get_screen('detail_screen')
+        if not detail.already_added:
+            self.notify("Adicione o livro primeiro.")
+            return
+
+        s_db = self.status_ui_to_db(ui_status)
+        pc = int(detail.page_count or 0)
+        self.update_book_status(s_db, pc, detail) 
+
+        self.update_book_status(s_db, pc, detail)
+
+    def update_book_status(self, s_db, pc, detail):
+        """
+        s_db: 'Quero ler' | 'Lendo' | 'Concluído' (formato do DB)
+        pc: total de páginas (int)
+        detail: a tela BookDetailScreen atual
+        """
+        if s_db == "Concluído" and pc > 0:
+            # marca como lido -> 100 %
+            self.update_book_progress(pc)
+            return
+        if s_db == "Quero ler":
+            # zera o progresso
+            self.update_book_progress(0)
+            return
+        
+        # "Lendo": só muda o status, mantém páginas
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE livros SET status = ? WHERE id = ?", (s_db, detail.book_id))
+            conn.commit()
+        except sqlite3.Error as e:
+            print("Erro ao atualizar status:", e)
+            self.notify("Não consegui salvar o status.")
+        finally:
+            conn.close()
+
+        detail.book_status = s_db
+        self._refresh_detail_progress()
+        self.notify(f"Status atualizado para {self.status_db_to_ui(s_db)}.")
+
+        # ------------------ PROGRESSO ------------------
+
+    def _refresh_detail_progress(self):
+        """Recalcula a % e ajusta status básico."""
+        detail = self.root.get_screen('detail_screen')
+        pc = int(detail.page_count or 0)
+        pr = int(detail.pages_read or 0)
+        if pc <= 0:
+            detail.progress_percent = 0
+            return
+        pr = max(0, min(pr, pc))
+        detail.pages_read = pr
+        detail.progress_percent = int(round((pr / pc) * 100))
+
+        # Regras simples de status (não força se usuário setou algo manualmente)
+        if pr == 0:
+            detail.book_status = 'Quero ler'
+        elif pr >= pc:
+            detail.book_status = 'Concluído'
+        else:
+            if detail.book_status not in ('Lendo', 'Concluído'):
+                detail.book_status = 'Lendo'
+
+    def prompt_update_progress(self):
+        """Abre um diálogo para digitar as páginas lidas e salvar."""
+        detail = self.root.get_screen('detail_screen')
+        if not detail.already_added:
+            self.notify("Adicione o livro para acompanhar o progresso.")
+            return
+
+        field = MDTextField(
+            text=str(detail.pages_read or 0),
+            hint_text="Páginas lidas",
+            input_filter="int"
+        )
+
+        self._progress_dialog = MDDialog(
+            title="Atualizar progresso",
+            type="custom",
+            content_cls=field,
+            buttons=[
+                MDFlatButton(text="Cancelar", on_release=lambda *_: self._dismiss_progress_dialog()),
+                MDFlatButton(text="Salvar", on_release=lambda *_: self._save_progress_from_dialog(field.text)),
+            ],
+        )
+        self._progress_dialog.open()
+
+    def _dismiss_progress_dialog(self):
+        dlg = getattr(self, "_progress_dialog", None)
+        if dlg:
+            dlg.dismiss()
+        self._progress_dialog = None
+
+    def _save_progress_from_dialog(self, txt):
+        self._dismiss_progress_dialog()
+        try:
+            new_val = int(txt or 0)
+        except ValueError:
+            self.notify("Valor inválido.")
+            return
+        self.update_book_progress(new_val)
+
+    def update_book_progress(self, new_pages_read: int):
+        """Atualiza paginas/status no DB, grava progresso do dia e reflete na UI."""
+        detail = self.root.get_screen('detail_screen')
+        pc = int(detail.page_count or 0)
+        old_pages = int(detail.pages_read or 0)
+        new_pages = max(0, min(int(new_pages_read or 0), pc))
+
+        # Status automático
+        if new_pages == 0:
+            status = 'Quero ler'
+        elif pc > 0 and new_pages >= pc:
+            status = 'Concluído'
+        else:
+            status = 'Lendo'
+
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            # Atualiza livro
+            cur.execute(
+                "UPDATE livros SET pagina_atual = ?, status = ? WHERE id = ?",
+                (new_pages, status, detail.book_id)
+            )
+            # Log diário (apenas crescimento)
+            delta = max(0, new_pages - old_pages)
+            if delta > 0:
+                cur.execute(
+                    "INSERT INTO progresso_diario (livro_id, data, paginas_lidas) VALUES (?, date('now'), ?)",
+                    (detail.book_id, delta)
+                )
+            conn.commit()
+        except sqlite3.Error as e:
+            print("Erro ao atualizar progresso:", e)
+            self.notify("Não consegui salvar o progresso.")
+        finally:
+            conn.close()
+
+        # Reflete na UI
+        detail.pages_read = new_pages
+        detail.book_status = status
+        self._refresh_detail_progress()
+        self.render_reading_chart(days=14)  # mantém a tela de gráficos coerente
+        self.notify("Progresso atualizado.")
+
+
+
 
 
 if __name__ == "__main__":

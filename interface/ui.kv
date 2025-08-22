@@ -1,6 +1,9 @@
 #:kivy 2.0
 #:import MDTopAppBar kivymd.uix.toolbar.MDTopAppBar
 
+# -------------------------
+# Item da grade de livros
+# -------------------------
 <BookItem>:
     orientation: 'vertical'
     size_hint_y: None
@@ -8,7 +11,6 @@
     padding: dp(8)
     spacing: dp(6)
     on_release: app.open_book_detail(root.book_id, root.title, root.authors, root.cover_url, root.page_count, root.description)
-    ripple_behavior: True
 
     canvas.before:
         Color:
@@ -16,7 +18,7 @@
         RoundedRectangle:
             size: self.size
             pos: self.pos
-            radius: [10,]
+            radius: [10, 10, 10, 10]
 
     FloatLayout:
         size_hint_y: None
@@ -26,6 +28,8 @@
             source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
             size_hint: 1, 1
             pos_hint: {"x": 0, "y": 0}
+            allow_stretch: True
+            keep_ratio: True   # substitui allow_stretch/keep_ratio
 
         MDIconButton:
             icon: "delete"
@@ -46,12 +50,59 @@
         ellipsize: "end"
 
 
+# --------------------------------------------
+# Barra inferior fixa com dois botões (ícones)
+# --------------------------------------------
+<BottomButton@ButtonBehavior+AnchorLayout>:
+    icon: "book"   # fallback
+    size_hint_x: .5
+    padding: 0
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, 0
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    MDIcon:
+        icon: root.icon
+        theme_text_color: "Custom"
+        text_color: 1, 1, 1, 1
+        size_hint: None, None
+        size: dp(28), dp(28)
+
+<BottomBar@BoxLayout>:
+    orientation: "horizontal"
+    size_hint_y: None
+    height: dp(64)
+    padding: 0
+    spacing: 0
+    canvas.before:
+        Color:
+            rgba: app.theme_cls.primary_color
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    canvas.after:
+        Color:
+            rgba: 1, 1, 1, .2
+        Rectangle:
+            pos: self.center_x - 0.5, self.y + dp(10)
+            size: 1, self.height - dp(20)
+
+
+# ---------------
+# ScreenManager
+# ---------------
 ScreenManager:
     MainScreen:
     GraphScreen:
     NotesScreen:
     BookDetailScreen:
 
+
+# ---------------
+# Tela Principal
+# ---------------
 <MainScreen>:
     name: 'main_screen'
     BoxLayout:
@@ -65,7 +116,6 @@ ScreenManager:
         MDBoxLayout:
             adaptive_height: True
             padding: dp(16)
-
             MDTextField:
                 id: input_field
                 hint_text: "Adicione um livro..."
@@ -82,52 +132,45 @@ ScreenManager:
                 spacing: dp(10)
                 height: self.minimum_height
 
-        # ---- Rodapé com 2 botões ----
-        MDBoxLayout:
-            size_hint_y: None
-            height: dp(64)
-            padding: dp(12)
-            spacing: dp(12)
-
-            MDRaisedButton:
-                text: "Gráfico de leitura"
-                icon: "chart-line"
-                on_release: app.go_graph()
-                md_bg_color: app.theme_cls.primary_color
-                text_color: 1,1,1,1
-
-            MDRaisedButton:
-                text: "Anotações"
-                icon: "notebook"
-                on_release: app.go_notes()
-                md_bg_color: app.theme_cls.primary_color
-                text_color: 1,1,1,1
+        BottomBar:
+            BottomButton:
+                icon: "chart-bar"          # ícone suportado
+                on_release: app.root.current = "graph_screen"
+            BottomButton:
+                icon: "note-text-outline"  # ícone suportado
+                on_release: app.root.current = "notes_screen"
 
 
+# -----------------------
+# Tela de GRÁFICOS
+# -----------------------
 <GraphScreen>:
-    name: 'graph_screen'
+    name: "graph_screen"
     BoxLayout:
-        orientation: 'vertical'
+        orientation: "vertical"
 
         MDTopAppBar:
-            title: "Gráfico de leitura"
+            title: "Gráficos"
             elevation: 4
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
 
         MDBoxLayout:
-            id: chart_box
             padding: dp(16)
             spacing: dp(8)
-            orientation: 'vertical'
+            orientation: "vertical"
+
+            MDBoxLayout:
+                id: chart_box
+                orientation: "vertical"
 
 
+# -----------------------
+# Tela de ANOTAÇÕES
+# -----------------------
 <NotesScreen>:
-    name: 'notes_screen'
-    notes_book_id: ""
-    notes_book_title: "Selecionar livro"
-
+    name: "notes_screen"
     BoxLayout:
-        orientation: 'vertical'
+        orientation: "vertical"
 
         MDTopAppBar:
             title: "Anotações"
@@ -135,9 +178,9 @@ ScreenManager:
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
 
         MDBoxLayout:
-            padding: dp(16)
+            padding: dp(12)
             spacing: dp(8)
-            orientation: 'vertical'
+            orientation: "vertical"
 
             MDBoxLayout:
                 adaptive_height: True
@@ -163,6 +206,9 @@ ScreenManager:
                     id: notes_list
 
 
+# -----------------------
+# Tela de DETALHES
+# -----------------------
 <BookDetailScreen>:
     name: 'detail_screen'
     BoxLayout:
@@ -184,6 +230,7 @@ ScreenManager:
                     source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
                     size_hint_y: None
                     height: dp(220)
+                    fit_mode: "contain"
 
                 MDLabel:
                     text: root.book_title
@@ -208,10 +255,132 @@ ScreenManager:
                     text_size: self.width, None
                     height: self.texture_size[1]
 
-                Widget:
+                # ---- PROGRESSO + STATUS + BOTÃO (tudo dentro do card) ----
+                MDCard:
+                    orientation: 'vertical'
+                    padding: dp(12)
+                    spacing: dp(10)
                     size_hint_y: None
-                    height: dp(8)
+                    height: self.minimum_height
+                    elevation: 0
+                    md_bg_color: 0.97, 0.97, 0.97, 1
 
+                    MDLabel:
+                        text: "Progresso de leitura"
+                        halign: "center"
+                        theme_text_color: "Secondary"
+                        size_hint_y: None
+                        height: self.texture_size[1]
+
+                    MDProgressBar:
+                        value: root.progress_percent
+                        max: 100
+                        size_hint_y: None
+                        height: dp(6)
+
+                    MDLabel:
+                        text: f"páginas lidas: {root.pages_read}"
+                        halign: "center"
+                        size_hint_y: None
+                        height: self.texture_size[1]
+
+                    MDLabel:
+                        text: f"{root.progress_percent}%"
+                        halign: "center"
+                        size_hint_y: None
+                        height: self.texture_size[1]
+
+                    MDLabel:
+                        text: "Status do livro"
+                        halign: "center"
+                        theme_text_color: "Secondary"
+                        size_hint_y: None
+                        height: self.texture_size[1]
+
+                    AnchorLayout:
+                        size_hint_y: None
+                        height: dp(48)
+                        anchor_x: "center"
+                        anchor_y: "center"
+
+                        MDBoxLayout:
+                            adaptive_width: True
+                            size_hint_y: None
+                            height: dp(40)
+                            spacing: dp(24)
+
+                            # Quero ler
+                            MDBoxLayout:
+                                size_hint: None, None
+                                height: dp(40) 
+                                width: self.minimum_width
+                                spacing: dp(6)
+                                MDCheckbox:
+                                    group: "status"
+                                    disabled: not root.already_added
+                                    active: app.status_ui(root.book_status) == "Quero ler"
+                                    on_active:
+                                        if self.active: app.set_status_from_ui("Quero ler")
+                                MDLabel:
+                                    text: "Quero ler"
+                                    size_hint: None, None
+                                    height: dp(40)
+                                    width: self.texture_size[0] + dp(8)
+                                    valign: "middle" 
+                                    halign: "left"
+                                    text_size: None, None
+
+                            # Lendo
+                            MDBoxLayout:
+                                size_hint: None, None
+                                height: dp(40) 
+                                width: self.minimum_width
+                                spacing: dp(6)
+                                MDCheckbox:
+                                    group: "status"
+                                    disabled: not root.already_added
+                                    active: app.status_ui(root.book_status) == "Lendo"
+                                    on_active:
+                                        if self.active: app.set_status_from_ui("Lendo")
+                                MDLabel:
+                                    text: "Lendo"
+                                    size_hint: None, None
+                                    height: dp(40)
+                                    width: self.texture_size[0] + dp(8)
+                                    valign: "middle" 
+                                    halign: "left"
+                                    text_size: None, None
+
+                            # Lido
+                            MDBoxLayout:
+                                size_hint: None, None
+                                height: dp(40) 
+                                width: self.minimum_width
+                                spacing: dp(6)
+                                MDCheckbox:
+                                    group: "status"
+                                    disabled: not root.already_added
+                                    active: app.status_ui(root.book_status) == "Lido"
+                                    on_active:
+                                        if self.active: app.set_status_from_ui("Lido")
+                                MDLabel:
+                                    text: "Lido"
+                                    size_hint: None, None
+                                    height: dp(40)
+                                    width: self.texture_size[0] + dp(8)
+                                    valign: "middle" 
+                                    halign: "left"
+                                    text_size: None, None
+
+                    MDRaisedButton:
+                        text: "Atualizar progresso"
+                        pos_hint: {"center_x": 0.5}
+                        size_hint_y: None
+                        height: dp(44)
+                        disabled: not root.already_added
+                        on_release: app.prompt_update_progress()
+
+                # Mostra só se ainda não foi salvo
                 MDRaisedButton:
                     text: "Adicionar"
                     pos_hint: {"center_x": 0.5}
