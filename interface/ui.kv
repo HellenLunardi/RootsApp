@@ -29,7 +29,7 @@
             size_hint: 1, 1
             pos_hint: {"x": 0, "y": 0}
             allow_stretch: True
-            keep_ratio: True   # substitui allow_stretch/keep_ratio
+            keep_ratio: True
 
         MDIconButton:
             icon: "delete"
@@ -54,7 +54,7 @@
 # Barra inferior fixa com dois botões (ícones)
 # --------------------------------------------
 <BottomButton@ButtonBehavior+AnchorLayout>:
-    icon: "book"   # fallback
+    icon: "book"
     size_hint_x: .5
     padding: 0
     canvas.before:
@@ -98,6 +98,8 @@ ScreenManager:
     GraphScreen:
     NotesScreen:
     BookDetailScreen:
+    NoteDetailScreen:
+    NoteEditorScreen:
 
 
 # ---------------
@@ -120,8 +122,12 @@ ScreenManager:
                 id: input_field
                 hint_text: "Adicione um livro..."
                 mode: "rectangle"
-                on_text_validate: app.add_book_search(self.text)
                 size_hint_x: 1
+                on_text_validate: app.add_book_search(self.text)
+
+            MDIconButton:
+                icon: "magnify"
+                on_release: app.add_book_search(input_field.text)
 
         ScrollView:
             GridLayout:
@@ -134,10 +140,10 @@ ScreenManager:
 
         BottomBar:
             BottomButton:
-                icon: "chart-bar"          # ícone suportado
+                icon: "chart-bar"
                 on_release: app.root.current = "graph_screen"
             BottomButton:
-                icon: "note-text-outline"  # ícone suportado
+                icon: "note-text-outline"
                 on_release: app.root.current = "notes_screen"
 
 
@@ -154,14 +160,16 @@ ScreenManager:
             elevation: 4
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
 
-        MDBoxLayout:
+        AnchorLayout:
+            anchor_y: "top"
             padding: dp(16)
-            spacing: dp(8)
-            orientation: "vertical"
 
             MDBoxLayout:
                 id: chart_box
                 orientation: "vertical"
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(8)
 
 
 # -----------------------
@@ -182,6 +190,7 @@ ScreenManager:
             spacing: dp(8)
             orientation: "vertical"
 
+            # Linha de ações: selecionar livro + filtrar + criar
             MDBoxLayout:
                 adaptive_height: True
                 spacing: dp(8)
@@ -191,23 +200,23 @@ ScreenManager:
                     text: root.notes_book_title
                     on_release: app.open_book_picker()
 
-                MDTextField:
-                    id: note_input
-                    hint_text: "Escreva uma anotação..."
-                    multiline: True
-                    size_hint_x: 1
+                MDRaisedButton:
+                    text: "Filtrar"
+                    on_release: app.apply_notes_filter()
 
                 MDRaisedButton:
-                    text: "Salvar"
-                    on_release: app.save_note_from_ui()
+                    text: "Criar anotação"
+                    on_release: app.create_note_for_selected_book()
 
+            # Lista de notas
             ScrollView:
                 MDList:
                     id: notes_list
+                    padding: dp(16), 0, dp(16), 0
 
 
 # -----------------------
-# Tela de DETALHES
+# Tela de DETALHES DO LIVRO (sem alterações aqui)
 # -----------------------
 <BookDetailScreen>:
     name: 'detail_screen'
@@ -255,7 +264,17 @@ ScreenManager:
                     text_size: self.width, None
                     height: self.texture_size[1]
 
-                # ---- PROGRESSO + STATUS + BOTÃO (tudo dentro do card) ----
+                # Botão "Adicionar" (só quando ainda não salvo)
+                MDRaisedButton:
+                    text: "Adicionar"
+                    pos_hint: {"center_x": 0.5}
+                    size_hint_y: None
+                    height: dp(0) if root.already_added else dp(48)
+                    opacity: 0 if root.already_added else 1
+                    disabled: root.already_added
+                    on_release: app.save_from_detail()
+
+                # ---- PROGRESSO + STATUS + BOTÃO ----
                 MDCard:
                     orientation: 'vertical'
                     padding: dp(12)
@@ -312,13 +331,13 @@ ScreenManager:
                             # Quero ler
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40) 
+                                height: dp(40)
                                 width: self.minimum_width
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
                                     disabled: not root.already_added
-                                    active: app.status_ui(root.book_status) == "Quero ler"
+                                    active: root.book_status in ("Quero ler", "", None)
                                     on_active:
                                         if self.active: app.set_status_from_ui("Quero ler")
                                 MDLabel:
@@ -326,20 +345,20 @@ ScreenManager:
                                     size_hint: None, None
                                     height: dp(40)
                                     width: self.texture_size[0] + dp(8)
-                                    valign: "middle" 
+                                    valign: "middle"
                                     halign: "left"
                                     text_size: None, None
 
                             # Lendo
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40) 
+                                height: dp(40)
                                 width: self.minimum_width
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
                                     disabled: not root.already_added
-                                    active: app.status_ui(root.book_status) == "Lendo"
+                                    active: root.book_status == "Lendo"
                                     on_active:
                                         if self.active: app.set_status_from_ui("Lendo")
                                 MDLabel:
@@ -347,20 +366,20 @@ ScreenManager:
                                     size_hint: None, None
                                     height: dp(40)
                                     width: self.texture_size[0] + dp(8)
-                                    valign: "middle" 
+                                    valign: "middle"
                                     halign: "left"
                                     text_size: None, None
 
                             # Lido
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40) 
+                                height: dp(40)
                                 width: self.minimum_width
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
                                     disabled: not root.already_added
-                                    active: app.status_ui(root.book_status) == "Lido"
+                                    active: root.book_status in ("Lido", "Concluído")
                                     on_active:
                                         if self.active: app.set_status_from_ui("Lido")
                                 MDLabel:
@@ -368,7 +387,7 @@ ScreenManager:
                                     size_hint: None, None
                                     height: dp(40)
                                     width: self.texture_size[0] + dp(8)
-                                    valign: "middle" 
+                                    valign: "middle"
                                     halign: "left"
                                     text_size: None, None
 
@@ -380,12 +399,77 @@ ScreenManager:
                         disabled: not root.already_added
                         on_release: app.prompt_update_progress()
 
-                # Mostra só se ainda não foi salvo
-                MDRaisedButton:
-                    text: "Adicionar"
-                    pos_hint: {"center_x": 0.5}
+
+# -----------------------
+# Tela: Detalhe da Nota (visualizar texto completo)
+# -----------------------
+<NoteDetailScreen>:
+    name: "note_detail"
+    note_id: 0
+    book_id: ""
+    book_title: ""
+    note_text: ""
+    BoxLayout:
+        orientation: "vertical"
+
+        MDTopAppBar:
+            title: root.book_title if root.book_title else "Anotação"
+            elevation: 4
+            left_action_items: [["arrow-left", lambda x: app.go_notes()]]
+            right_action_items: [["pencil", lambda x: app.open_note_editor(root.note_id)], ["delete", lambda x: app.delete_note_confirm(root.note_id)]]
+
+        ScrollView:
+            MDBoxLayout:
+                orientation: "vertical"
+                padding: dp(16)
+                adaptive_height: True
+                MDLabel:
+                    text: root.note_text
+                    halign: "left"
                     size_hint_y: None
-                    height: dp(0) if root.already_added else dp(48)
-                    opacity: 0 if root.already_added else 1
-                    disabled: root.already_added
-                    on_release: app.save_from_detail()
+                    text_size: self.width, None
+                    height: self.texture_size[1]
+
+
+# -----------------------
+# Tela: Editor de Nota (criar/editar)
+# -----------------------
+<NoteEditorScreen>:
+    name: "note_editor"
+    note_id: 0
+    book_id: ""
+    book_title: ""
+    note_text: ""
+    BoxLayout:
+        orientation: "vertical"
+
+        MDTopAppBar:
+            title: "Editar anotação" if root.note_id else "Nova anotação"
+            elevation: 4
+            left_action_items: [["arrow-left", lambda x: app.go_notes()]]
+
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: dp(16)
+            spacing: dp(12)
+
+            MDLabel:
+                text: root.book_title if root.book_title else "Sem livro selecionado"
+                theme_text_color: "Secondary"
+                halign: "left"
+                size_hint_y: None
+                height: self.texture_size[1]
+
+            MDTextField:
+                id: editor_text
+                hint_text: "Escreva sua anotação..."
+                multiline: True
+                mode: "rectangle"
+                size_hint_y: None
+                height: dp(300)
+                text: root.note_text
+
+            MDRaisedButton:
+                text: "Salvar"
+                pos_hint: {"center_x": 0.5}
+                on_release: app.save_note_from_editor()

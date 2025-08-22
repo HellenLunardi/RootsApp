@@ -17,6 +17,10 @@ from kivy.uix.screenmanager import Screen
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.list import TwoLineAvatarIconListItem, IconRightWidget
+from functools import partial
+from kivy.metrics import dp
+from kivy.loader import Loader
 
 try:
     from kivy_garden.graph import Graph, MeshLinePlot
@@ -26,6 +30,17 @@ except Exception:
 
 from kivymd.uix.menu import MDDropdownMenu
 
+class NoteDetailScreen(Screen):
+    note_id = NumericProperty(0)
+    book_id = StringProperty("")
+    book_title = StringProperty("")
+    note_text = StringProperty("")
+
+class NoteEditorScreen(Screen):
+    note_id = NumericProperty(0)   # 0 = nova
+    book_id = StringProperty("")
+    book_title = StringProperty("")
+    note_text = StringProperty("")
 
 class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
@@ -59,15 +74,11 @@ class BookDetailScreen(Screen):
     description = StringProperty('')
     already_added = BooleanProperty(False)
     pages_read = NumericProperty(0)
-    book_status = OptionProperty(
-        'Quero ler',
-        options=('Quero ler', 'Lendo', 'Concluído')
-    )
+    book_status = StringProperty('Quero ler')
     progress_percent = NumericProperty(0)
 
 
 class RootsApp(MDApp):
-
     # ------------------ NAV ------------------
 
     def go_home(self):
@@ -76,7 +87,7 @@ class RootsApp(MDApp):
     def go_graph(self):
         self.root.current = 'graph_screen'
         # desenha/atualiza o gráfico quando entrar
-        self.render_reading_chart(days=14)
+        self.render_reading_chart(days=7)
 
     def go_notes(self):
         self.root.current = 'notes_screen'
@@ -169,7 +180,7 @@ class RootsApp(MDApp):
     def on_start(self):
         self.load_saved_books()
         # Pré-renderiza dados das outras telas (opcional)
-        self.render_reading_chart(days=14)
+        self.render_reading_chart(days=7)
         self.load_notes()
 
     # ------------------ DETALHES ------------------
@@ -186,37 +197,58 @@ class RootsApp(MDApp):
 
     def open_book_detail(self, book_id, title, authors, cover_url, page_count, description=''):
         detail = self.root.get_screen('detail_screen')
+
+        # Preenche o mínimo para abrir a tela já renderizada
         detail.book_id = book_id
         detail.book_title = title
         detail.authors = authors
         detail.cover_url = cover_url
-        detail.page_count = page_count
+        detail.page_count = int(page_count or 0)
         detail.description = description or ''
         detail.already_added = self.is_book_saved(book_id, title, authors)
 
+        # Progresso básico enquanto carrega
         if detail.already_added:
-            db_path = os.path.join(self.user_data_dir, "db", "roots.db")
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT COALESCE(pagina_atual,0), COALESCE(status,'Quero ler'), COALESCE(qtde_paginas,0)
-                FROM livros WHERE id = ?
-            """, (book_id,))
-            row = cur.fetchone()
-            conn.close()
-            if row:
-                detail.pages_read = int(row[0] or 0)
-                detail.book_status = row[1] or 'Quero ler'
-                if (row[2] or 0) > 0:
-                    detail.page_count = int(row[2] or detail.page_count)
+            # mantém o que já tem salvo numa visita anterior (se houver), senão zera
+            pass
         else:
             detail.pages_read = 0
             detail.book_status = 'Quero ler'
-
         self._refresh_detail_progress()
-        
+
+        # Mostra a tela imediatamente
         self.root.current = 'detail_screen'
         self.root.get_screen('main_screen').show_back = False
+
+        # Hidrata com DB no próximo frame (fora do caminho da animação)
+        Clock.schedule_once(lambda *_: self._hydrate_detail_from_db(book_id), 0)
+
+    def _hydrate_detail_from_db(self, book_id):
+        detail = self.root.get_screen('detail_screen')
+        if not detail.already_added:
+            return
+
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT COALESCE(pagina_atual,0),
+                    COALESCE(status,'Quero ler'),
+                    COALESCE(qtde_paginas,0)
+                FROM livros WHERE id = ?
+            """, (book_id,))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+
+        if row:
+            detail.pages_read = int(row[0] or 0)
+            detail.book_status = row[1] or 'Quero ler'
+            if (row[2] or 0) > 0:
+                detail.page_count = int(row[2])
+            self._refresh_detail_progress()
+
 
     def save_from_detail(self):
         def _do_save(*_):
@@ -260,6 +292,7 @@ class RootsApp(MDApp):
         seen_ids = set()
         seen_title_author = set()
 
+
         def ok(req, result):
             added = 0
             items = (result or {}).get('items') or []
@@ -271,8 +304,10 @@ class RootsApp(MDApp):
                 authors = ', '.join(authors_list)
                 cover_url = (volume_info.get('imageLinks', {}) or {}).get('thumbnail', '') or ""
                 page_count = volume_info.get('pageCount', 0) or 0
-                raw_desc = volume_info.get('description', '') or ''
-                description = self.clean_description(raw_desc)
+                description = volume_info.get('description', '') or ''
+
+                if not cover_url:
+                    continue
 
                 if book_id and book_id in seen_ids:
                     continue
@@ -372,6 +407,9 @@ class RootsApp(MDApp):
                 removable=True
             ))
 
+            if cover_url:
+                Loader.image(cover_url)
+
     def delete_book(self, book_id, title=None):
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
@@ -391,7 +429,11 @@ class RootsApp(MDApp):
 
     # ------------------ GRÁFICO ------------------
 
-    def render_reading_chart(self, days=14):
+    def render_reading_chart(self, days=7):
+        from kivymd.uix.boxlayout import MDBoxLayout
+        from kivymd.uix.label import MDLabel
+        # se você já importou dp no topo (kivy.metrics import dp), pode usar direto aqui
+
         gs = self.root.get_screen('graph_screen')
         box = gs.ids.chart_box
         box.clear_widgets()
@@ -399,56 +441,99 @@ class RootsApp(MDApp):
         end = date.today()
         start = end - timedelta(days=days - 1)
 
+        # Busca dados agregados por dia
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT date(data) AS d, SUM(COALESCE(paginas_lidas, 0)) AS pag
             FROM progresso_diario
-            WHERE date(data) >= ?
+            WHERE date(data) BETWEEN ? AND ?
             GROUP BY date(data)
             ORDER BY d
-        """, (start.isoformat(),))
+        """, (start.isoformat(), end.isoformat()))
         rows = dict(cursor.fetchall())
         conn.close()
 
-        xs, ys = [], []
+        # Monta série contínua
+        xs, ys, dates = [], [], []
         d = start
         i = 0
         while d <= end:
             xs.append(i)
             ys.append(int(rows.get(d.isoformat(), 0)))
+            dates.append(d)
             i += 1
             d += timedelta(days=1)
 
-        if HAS_GRAPH:
-            graph = Graph(
-                xlabel='Dias', ylabel='Páginas',
-                x_ticks_minor=0,
-                x_ticks_major=max(1, days // 7),
-                y_ticks_major=max(1, (max(ys) if ys else 1) // 5 or 1),
-                x_grid=False, y_grid=True,
-                xmin=0, xmax=max(0, len(xs) - 1),
-                ymin=0, ymax=max(1, max(ys) if ys else 1),
-                size_hint=(1, 1),
-            )
-            plot = MeshLinePlot()
-            plot.points = list(zip(xs, ys))
-            graph.add_plot(plot)
-            box.add_widget(graph)
-        else:
-            from kivymd.uix.label import MDLabel
-            total = sum(ys)
-            avg = round(total / days, 1) if days else total
+        total = sum(ys)
+        avg = (total / len(ys)) if ys else 0.0
+
+        # Caso não tenha o garden.graph instalado
+        if not HAS_GRAPH:
             box.add_widget(MDLabel(
-                text=("Para ver o gráfico:\n"
-                      "pip install kivy-garden\n"
-                      "garden install graph\n\n"
-                      f"Últimos {days} dias — Total: {total} | Média/dia: {avg}"),
+                text=(f"Gráfico indisponível (instale kivy-garden + garden graph).\n\n"
+                    f"Últimos {days} dias — Total: {total} | Média/dia: {avg:.1f}"),
                 halign="center"
             ))
+            # Linha de rótulos dos dias da semana (fallback visual)
+            row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=0)
+            pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+            for dt in dates:
+                row.add_widget(MDLabel(text=pt[dt.weekday()], halign='center'))
+            box.add_widget(row)
+            return
 
-    # ------------------ ANOTAÇÕES ------------------
+        # ----- Com o Graph -----
+        # Margem de topo para caber a linha de média com folga
+        y_max_base = max(ys + [avg]) if ys else 1
+        # dá um “respiro” no topo
+        y_max = max(1, int(round(y_max_base + max(1, y_max_base * 0.15))))
+        y_tick = max(1, int(round(y_max / 5)))
+
+        graph = Graph(
+            xlabel='Dias', ylabel='Páginas',
+            x_ticks_minor=0,
+            x_ticks_major=1,          # 1 dia por marca
+            y_ticks_major=y_tick,
+            x_grid=True, y_grid=True,
+            xmin=-0.5, xmax=(len(xs) - 0.5) if xs else 0.5,
+            ymin=0, ymax=y_max,
+            size_hint=(1, None), height=dp(240),
+        )
+
+        # Série de leitura (páginas/dia)
+        line = MeshLinePlot(color=[0, 0.4, 1, 1])
+        line.points = list(zip(range(len(ys)), ys))
+        graph.add_plot(line)
+
+        # Linha de MÉDIA horizontal
+        avg_plot = MeshLinePlot(color=[1, 0, 0, 1])
+        avg_plot.points = [(x, avg) for x in range(len(ys))]
+        graph.add_plot(avg_plot)
+
+        box.add_widget(graph)
+
+        # Rótulos com dias da semana alinhados abaixo do gráfico
+        row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=0, padding=(dp(8), 0))
+        pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+        for dt in dates:
+            # cada label ocupa a mesma fração da largura
+            lbl = MDLabel(text=pt[dt.weekday()], halign='center')
+            row.add_widget(lbl)
+        box.add_widget(row)
+
+        # Mostra a média num texto auxiliar
+        box.add_widget(MDLabel(
+            text=f"Média: {avg:.1f} pág/dia",
+            halign="center",
+            size_hint_y=None,
+            height=dp(20),
+            theme_text_color="Secondary"
+        ))
+
+
+      # ------------------ ANOTAÇÕES (NOVO FLUXO) ------------------
 
     def open_book_picker(self):
         ns = self.root.get_screen('notes_screen')
@@ -479,32 +564,23 @@ class RootsApp(MDApp):
         if getattr(self, "_notes_menu", None):
             self._notes_menu.dismiss()
 
-    def save_note_from_ui(self):
+    def apply_notes_filter(self):
+        """Filtra a lista de notas pelo livro selecionado."""
         ns = self.root.get_screen('notes_screen')
-        txt = (ns.ids.note_input.text or "").strip()
-        if not txt:
-            self.notify("Escreva algo na anotação.")
+        bid = (ns.notes_book_id or "").strip()
+        self.load_notes(filter_book_id=bid if bid else None)
+
+    def create_note_for_selected_book(self):
+        """Abre o editor para criar nota do livro selecionado."""
+        ns = self.root.get_screen('notes_screen')
+        bid = (ns.notes_book_id or "").strip()
+        if not bid:
+            self.notify("Selecione um livro para criar a anotação.")
             return
+        self.open_note_editor(note_id=0, book_id=bid, book_title=ns.notes_book_title, note_text="")
 
-        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "INSERT INTO anotacoes (livro_id, texto) VALUES (?, ?)",
-                (ns.notes_book_id or None, txt)
-            )
-            conn.commit()
-            ns.ids.note_input.text = ""
-            self.notify("Anotação salva.")
-            self.load_notes()
-        except sqlite3.Error as e:
-            print(f"Erro ao salvar anotação: {e}")
-            self.notify("Erro ao salvar anotação.")
-        finally:
-            conn.close()
-
-    def load_notes(self):
+    def load_notes(self, filter_book_id=None):
+        """Carrega a lista de notas. Se filter_book_id for dado, filtra por livro."""
         ns = self.root.get_screen('notes_screen')
         lst = ns.ids.notes_list
         lst.clear_widgets()
@@ -512,18 +588,193 @@ class RootsApp(MDApp):
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT a.id, COALESCE(l.nome, 'Sem livro'), a.texto
-            FROM anotacoes a
-            LEFT JOIN livros l ON l.id = a.livro_id
-            ORDER BY a.id DESC
-        """)
+        if filter_book_id:
+            cursor.execute("""
+                SELECT a.id, COALESCE(l.nome, 'Sem livro'), a.texto, a.livro_id
+                FROM anotacoes a
+                LEFT JOIN livros l ON l.id = a.livro_id
+                WHERE a.livro_id = ?
+                ORDER BY a.id DESC
+            """, (filter_book_id,))
+        else:
+            cursor.execute("""
+                SELECT a.id, COALESCE(l.nome, 'Sem livro'), a.texto, a.livro_id
+                FROM anotacoes a
+                LEFT JOIN livros l ON l.id = a.livro_id
+                ORDER BY a.id DESC
+            """)
         rows = cursor.fetchall()
         conn.close()
 
-        from kivymd.uix.list import TwoLineListItem
-        for _id, book_title, text in rows:
-            lst.add_widget(TwoLineListItem(text=book_title, secondary_text=(text or "")[:120]))
+        for note_id, book_title, text, livro_id in rows:
+            preview = (text or "").replace("\n", " ")
+            if len(preview) > 80:
+                preview = preview[:80] + "…"
+
+            item = TwoLineAvatarIconListItem(text=book_title, secondary_text=preview)
+
+            # abrir detalhe ao tocar no item
+            item.bind(on_release=partial(self.open_note_detail, note_id))
+
+            # ícone editar
+            item.add_widget(
+                IconRightWidget(icon="pencil", on_release=partial(self.open_note_editor, note_id))
+            )
+            # ícone apagar
+            item.add_widget(
+                IconRightWidget(icon="delete", on_release=partial(self.delete_note_confirm, note_id))
+            )
+
+            lst.add_widget(item)
+
+
+    # ---- Detalhar / Editar / Apagar ----
+
+    def open_note_detail(self, note_id, *args):
+        """Abre tela com a anotação completa."""
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT a.id, a.texto, COALESCE(l.id,''), COALESCE(l.nome,'Sem livro')
+            FROM anotacoes a
+            LEFT JOIN livros l ON l.id = a.livro_id
+            WHERE a.id = ?
+        """, (note_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            self.notify("Anotação não encontrada.")
+            return
+
+        note_detail = self.root.get_screen('note_detail')
+        note_detail.note_id = int(row[0])
+        note_detail.note_text = row[1] or ""
+        note_detail.book_id = row[2] or ""
+        note_detail.book_title = row[3] or "Sem livro"
+        self.root.current = 'note_detail'
+
+    def open_note_editor(self, note_id=0, *args, book_id="", book_title="", note_text=""):
+        """
+        Abre o editor.
+        - Se note_id > 0 -> carrega do DB
+        - Se note_id == 0 -> usa (book_id, book_title) recebidos
+        """
+        editor = self.root.get_screen('note_editor')
+
+        if note_id:
+            db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.id, a.texto, COALESCE(l.id,''), COALESCE(l.nome,'Sem livro')
+                FROM anotacoes a
+                LEFT JOIN livros l ON l.id = a.livro_id
+                WHERE a.id = ?
+            """, (note_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                self.notify("Anotação não encontrada.")
+                return
+            editor.note_id = int(row[0])
+            editor.note_text = row[1] or ""
+            editor.book_id = row[2] or ""
+            editor.book_title = row[3] or "Sem livro"
+        else:
+            editor.note_id = 0
+            editor.note_text = note_text or ""
+            editor.book_id = book_id or ""
+            editor.book_title = book_title or "Sem livro"
+
+        # coloca o texto no campo
+        editor.ids.editor_text.text = editor.note_text
+        self.root.current = 'note_editor'
+
+    def save_note_from_editor(self):
+        """Salva criação/edição a partir da tela NoteEditor."""
+        editor = self.root.get_screen('note_editor')
+        text = (editor.ids.editor_text.text or "").strip()
+        if not text:
+            self.notify("Escreva algo na anotação.")
+            return
+
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        try:
+            if editor.note_id:  # editar
+                cursor.execute(
+                    "UPDATE anotacoes SET texto = ?, livro_id = ? WHERE id = ?",
+                    (text, editor.book_id or None, editor.note_id)
+                )
+                note_id = editor.note_id
+            else:  # criar
+                if not editor.book_id:
+                    self.notify("Selecione um livro para a nova anotação.")
+                    conn.close()
+                    return
+                cursor.execute(
+                    "INSERT INTO anotacoes (livro_id, texto) VALUES (?, ?)",
+                    (editor.book_id, text)
+                )
+                note_id = cursor.lastrowid
+            conn.commit()
+        except sqlite3.Error as e:
+            print("Erro ao salvar anotação:", e)
+            self.notify("Erro ao salvar anotação.")
+            conn.close()
+            return
+        conn.close()
+
+        # Atualiza lists e abre detalhe
+        self.load_notes()
+        self.open_note_detail(note_id)
+
+    def delete_note_confirm(self, note_id, *args):
+        """Confirma exclusão e apaga a nota."""
+        self._pending_delete_note_id = int(note_id)
+
+        def _do_delete(*_):
+            nid = getattr(self, "_pending_delete_note_id", 0)
+            if not nid:
+                return
+            db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            try:
+                cur.execute("DELETE FROM anotacoes WHERE id = ?", (nid,))
+                conn.commit()
+            except sqlite3.Error as e:
+                print("Erro ao apagar anotação:", e)
+                self.notify("Falha ao apagar anotação.")
+                conn.close()
+                return
+            conn.close()
+            self.notify("Anotação apagada.")
+            self._pending_delete_note_id = 0
+            # Se estava no detalhe, volta para lista
+            if self.root.current == 'note_detail':
+                self.go_notes()
+            else:
+                self.load_notes()
+
+        self._delete_dialog = MDDialog(
+            title="Apagar anotação",
+            text="Tem certeza que deseja apagar esta anotação?",
+            buttons=[
+                MDFlatButton(text="Cancelar", on_release=lambda *_: self._dismiss_delete_dialog()),
+                MDFlatButton(text="Apagar", on_release=_do_delete),
+            ],
+        )
+        self._delete_dialog.open()
+
+    def _dismiss_delete_dialog(self):
+        dlg = getattr(self, "_delete_dialog", None)
+        if dlg:
+            dlg.dismiss()
+        self._delete_dialog = None
 
         # ------------------ STATUS ------------------
 
@@ -551,8 +802,6 @@ class RootsApp(MDApp):
         s_db = self.status_ui_to_db(ui_status)
         pc = int(detail.page_count or 0)
         self.update_book_status(s_db, pc, detail) 
-
-        self.update_book_status(s_db, pc, detail)
 
     def update_book_status(self, s_db, pc, detail):
         """
@@ -649,7 +898,7 @@ class RootsApp(MDApp):
         self.update_book_progress(new_val)
 
     def update_book_progress(self, new_pages_read: int):
-        """Atualiza paginas/status no DB, grava progresso do dia e reflete na UI."""
+        """Atualiza paginas/status no DB, grava progresso do dia (data local) e reflete na UI."""
         detail = self.root.get_screen('detail_screen')
         pc = int(detail.page_count or 0)
         old_pages = int(detail.pages_read or 0)
@@ -672,12 +921,14 @@ class RootsApp(MDApp):
                 "UPDATE livros SET pagina_atual = ?, status = ? WHERE id = ?",
                 (new_pages, status, detail.book_id)
             )
-            # Log diário (apenas crescimento)
+
+            # Log diário (apenas crescimento) — usando DATA LOCAL (sem UTC)
             delta = max(0, new_pages - old_pages)
             if delta > 0:
+                today = date.today().isoformat()
                 cur.execute(
-                    "INSERT INTO progresso_diario (livro_id, data, paginas_lidas) VALUES (?, date('now'), ?)",
-                    (detail.book_id, delta)
+                    "INSERT INTO progresso_diario (livro_id, data, paginas_lidas) VALUES (?, ?, ?)",
+                    (detail.book_id, today, delta)
                 )
             conn.commit()
         except sqlite3.Error as e:
@@ -685,6 +936,14 @@ class RootsApp(MDApp):
             self.notify("Não consegui salvar o progresso.")
         finally:
             conn.close()
+
+        # Reflete na UI e no gráfico
+        detail.pages_read = new_pages
+        detail.book_status = status
+        self._refresh_detail_progress()
+        self.render_reading_chart(days=14)  # mantém a tela de gráficos coerente
+        self.notify("Progresso atualizado.")
+
 
         # Reflete na UI
         detail.pages_read = new_pages
