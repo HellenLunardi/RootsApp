@@ -21,6 +21,10 @@ from kivymd.uix.list import TwoLineAvatarIconListItem, IconRightWidget
 from functools import partial
 from kivy.metrics import dp
 from kivy.loader import Loader
+from pathlib import Path
+from kivy.core.text import LabelBase
+from kivy.resources import resource_add_path
+from kivy.core.window import Window
 
 try:
     from kivy_garden.graph import Graph, MeshLinePlot
@@ -79,6 +83,28 @@ class BookDetailScreen(Screen):
 
 
 class RootsApp(MDApp):
+    APP_BG_COLOR = (146/255, 216/255, 255/255, 1)
+
+    def _register_fonts(self):
+        import os
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            fonts_dir = os.path.join(base_dir, "fonts")
+            resource_add_path(fonts_dir)
+
+            LabelBase.register(
+                name="Poppins",
+                fn_regular=os.path.join(fonts_dir, "Poppins-Regular.ttf"),
+                fn_bold=os.path.join(fonts_dir, "Poppins-SemiBold.ttf"),
+            )
+            LabelBase.register(
+                name="Inter",
+                fn_regular=os.path.join(fonts_dir, "Inter-Regular.ttf"),
+                fn_bold=os.path.join(fonts_dir, "Inter-Medium.ttf"),
+            )
+        except Exception as e:
+            print("[Fonts] Falha ao registrar fontes:", e)
+
     # ------------------ NAV ------------------
 
     def go_home(self):
@@ -125,6 +151,8 @@ class RootsApp(MDApp):
 
     def build(self):
         self.initialize_database()
+        self._register_fonts()
+        Window.clearcolor = self.APP_BG_COLOR
         return Builder.load_file('ui.kv')
 
     def initialize_database(self):
@@ -218,7 +246,6 @@ class RootsApp(MDApp):
 
         # Mostra a tela imediatamente
         self.root.current = 'detail_screen'
-        self.root.get_screen('main_screen').show_back = False
 
         # Hidrata com DB no próximo frame (fora do caminho da animação)
         Clock.schedule_once(lambda *_: self._hydrate_detail_from_db(book_id), 0)
@@ -280,6 +307,8 @@ class RootsApp(MDApp):
             sm.show_back = False
             return
 
+        sm.show_back = True
+        
         api_url = (
             "https://www.googleapis.com/books/v1/volumes"
             f"?q={quote_plus(q)}"
@@ -546,13 +575,24 @@ class RootsApp(MDApp):
         books = cursor.fetchall()
         conn.close()
 
-        items = [{
-            "text": title,
-            "on_release": (lambda b_id=bid, t=title: self._pick_book_for_note(b_id, t))
-        } for bid, title in books] or [{
-            "text": "Sem livros salvos",
-            "on_release": lambda: self._pick_book_for_note("", "Sem livro")
-        }]
+        items = [
+        {
+            "text": "Todos",
+            "on_release": lambda: self._pick_book_for_note("", "Todos"),
+        }
+        ]
+        
+        if books:
+            items += [{
+                "text": title,
+                "on_release": (lambda b_id=bid, t=title: self._pick_book_for_note(b_id, t))
+            } for bid, title in books]
+        else:
+            items += [{
+                "text": "Todos",
+                "on_release": lambda: self._pick_book_for_note("", "Todos")
+            }]
+
 
         self._notes_menu = MDDropdownMenu(caller=btn, items=items, width_mult=4)
         self._notes_menu.open()
@@ -560,7 +600,7 @@ class RootsApp(MDApp):
     def _pick_book_for_note(self, book_id, title):
         ns = self.root.get_screen('notes_screen')
         ns.notes_book_id = book_id or ""
-        ns.notes_book_title = title if book_id else "Sem livros"
+        ns.notes_book_title = title if book_id else "Todos"
         if getattr(self, "_notes_menu", None):
             self._notes_menu.dismiss()
 
@@ -941,7 +981,7 @@ class RootsApp(MDApp):
         detail.pages_read = new_pages
         detail.book_status = status
         self._refresh_detail_progress()
-        self.render_reading_chart(days=14)  # mantém a tela de gráficos coerente
+        self.render_reading_chart(days=7)  # mantém a tela de gráficos coerente
         self.notify("Progresso atualizado.")
 
 
@@ -949,12 +989,8 @@ class RootsApp(MDApp):
         detail.pages_read = new_pages
         detail.book_status = status
         self._refresh_detail_progress()
-        self.render_reading_chart(days=14)  # mantém a tela de gráficos coerente
+        self.render_reading_chart(days=7)  # mantém a tela de gráficos coerente
         self.notify("Progresso atualizado.")
-
-
-
-
 
 if __name__ == "__main__":
     RootsApp().run()

@@ -44,7 +44,9 @@
         theme_text_color: "Primary"
         size_hint_y: None
         height: self.texture_size[1] + dp(10)
-        font_style: "Caption"
+        font_name: "Poppins"
+        bold: True
+        font_size: "13sp"
         shorten: True
         max_lines: 2
         ellipsize: "end"
@@ -107,8 +109,9 @@ ScreenManager:
 # ---------------
 <MainScreen>:
     name: 'main_screen'
-    BoxLayout:
+    MDBoxLayout:
         orientation: 'vertical'
+        md_bg_color: app.APP_BG_COLOR
 
         MDTopAppBar:
             title: "Roots"
@@ -185,13 +188,16 @@ ScreenManager:
             elevation: 4
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
 
-        MDBoxLayout:
-            padding: dp(12)
-            spacing: dp(8)
-            orientation: "vertical"
+        # Barra de ações centralizada no topo
+        AnchorLayout:
+            size_hint_y: None
+            height: dp(56)
+            padding: dp(12), 0
+            anchor_x: "center"
+            anchor_y: "center"
 
-            # Linha de ações: selecionar livro + filtrar + criar
             MDBoxLayout:
+                adaptive_width: True     # ajusta a largura ao conteúdo
                 adaptive_height: True
                 spacing: dp(8)
 
@@ -208,11 +214,16 @@ ScreenManager:
                     text: "Criar anotação"
                     on_release: app.create_note_for_selected_book()
 
-            # Lista de notas
-            ScrollView:
-                MDList:
-                    id: notes_list
-                    padding: dp(16), 0, dp(16), 0
+
+        # Lista com scroll ocupando o restante
+        ScrollView:
+            do_scroll_x: False
+            MDList:
+                id: notes_list
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(16), 0, dp(16), 0
+
 
 
 # -----------------------
@@ -243,11 +254,13 @@ ScreenManager:
 
                 MDLabel:
                     text: root.book_title
-                    font_style: "H1"
                     halign: "center"
                     size_hint_y: None
                     text_size: self.width, None
                     height: self.texture_size[1]
+                    font_name: "Poppins"
+                    bold: True
+                    font_size: "24sp"
 
                 MDLabel:
                     text: root.authors
@@ -256,6 +269,9 @@ ScreenManager:
                     size_hint_y: None
                     text_size: self.width, None
                     height: self.texture_size[1]
+                    font_name: "Inter"
+                    italic: True
+                    font_size: "14sp"
 
                 MDLabel:
                     text: f"{root.page_count} páginas" if root.page_count else ""
@@ -263,6 +279,9 @@ ScreenManager:
                     size_hint_y: None
                     text_size: self.width, None
                     height: self.texture_size[1]
+                    font_name: "Inter"
+                    font_size: "13sp"
+                    theme_text_color: "Secondary"
 
                 # Botão "Adicionar" (só quando ainda não salvo)
                 MDRaisedButton:
@@ -290,6 +309,9 @@ ScreenManager:
                         theme_text_color: "Secondary"
                         size_hint_y: None
                         height: self.texture_size[1]
+                        font_name: "Poppins"
+                        bold: True
+                        font_size: "14sp"
 
                     MDProgressBar:
                         value: root.progress_percent
@@ -302,12 +324,17 @@ ScreenManager:
                         halign: "center"
                         size_hint_y: None
                         height: self.texture_size[1]
+                        font_name: "Inter"
+                        font_size: "14sp"
 
                     MDLabel:
                         text: f"{root.progress_percent}%"
                         halign: "center"
                         size_hint_y: None
                         height: self.texture_size[1]
+                        font_name: "Inter"
+                        bold: True
+                        font_size: "16sp"
 
                     MDLabel:
                         text: "Status do livro"
@@ -318,21 +345,21 @@ ScreenManager:
 
                     AnchorLayout:
                         size_hint_y: None
-                        height: dp(48)
+                        height: dp(56)
                         anchor_x: "center"
                         anchor_y: "center"
 
-                        MDBoxLayout:
-                            adaptive_width: True
+                        MDGridLayout:
+                            cols: 3
+                            spacing: dp(16)
                             size_hint_y: None
                             height: dp(40)
-                            spacing: dp(24)
+                            adaptive_width: True
 
                             # Quero ler
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40)
-                                width: self.minimum_width
+                                size: dp(120), dp(40)   # largura fixa evita loop
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
@@ -342,18 +369,13 @@ ScreenManager:
                                         if self.active: app.set_status_from_ui("Quero ler")
                                 MDLabel:
                                     text: "Quero ler"
-                                    size_hint: None, None
-                                    height: dp(40)
-                                    width: self.texture_size[0] + dp(8)
                                     valign: "middle"
                                     halign: "left"
-                                    text_size: None, None
 
                             # Lendo
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40)
-                                width: self.minimum_width
+                                size: dp(90), dp(40)
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
@@ -363,18 +385,13 @@ ScreenManager:
                                         if self.active: app.set_status_from_ui("Lendo")
                                 MDLabel:
                                     text: "Lendo"
-                                    size_hint: None, None
-                                    height: dp(40)
-                                    width: self.texture_size[0] + dp(8)
                                     valign: "middle"
                                     halign: "left"
-                                    text_size: None, None
 
                             # Lido
                             MDBoxLayout:
                                 size_hint: None, None
-                                height: dp(40)
-                                width: self.minimum_width
+                                size: dp(80), dp(40)
                                 spacing: dp(6)
                                 MDCheckbox:
                                     group: "status"
@@ -384,12 +401,9 @@ ScreenManager:
                                         if self.active: app.set_status_from_ui("Lido")
                                 MDLabel:
                                     text: "Lido"
-                                    size_hint: None, None
-                                    height: dp(40)
-                                    width: self.texture_size[0] + dp(8)
                                     valign: "middle"
                                     halign: "left"
-                                    text_size: None, None
+
 
                     MDRaisedButton:
                         text: "Atualizar progresso"
