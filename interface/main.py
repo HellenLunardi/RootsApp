@@ -3,7 +3,6 @@ import os.path
 import re
 import html
 from datetime import date, timedelta, datetime
-
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.clock import Clock
 from kivy.network.urlrequest import UrlRequest
@@ -25,6 +24,7 @@ from kivy.core.text import LabelBase
 from kivy.resources import resource_add_path
 from kivy.core.window import Window
 from kivymd.uix.menu import MDDropdownMenu
+from kivy.utils import get_color_from_hex
 
 # ---------- Graph (kivy-garden.graph) ----------
 try:
@@ -92,7 +92,7 @@ class BookDetailScreen(Screen):
 
 # ===================== APP =====================
 class RootsApp(MDApp):
-    APP_BG_COLOR = (146/255, 216/255, 255/255, 1)
+    APP_BG_COLOR = get_color_from_hex("#1b2c3c")
 
         # --- MENU DE STATUS NO DETALHE DO LIVRO ---
     def open_status_menu(self, caller):
@@ -190,6 +190,14 @@ class RootsApp(MDApp):
 
     # ------------------ APP LIFECYCLE ------------------
     def build(self):
+        # Define o tema como Escuro
+        self.theme_cls.theme_style = "Dark"
+        
+        # Define a cor primária (botões, barras, etc.) para o Marrom Tronco
+        # KivyMD usa nomes de paletas, "Brown" é o mais próximo do seu #794428
+        self.theme_cls.primary_palette = "Brown"
+        self.theme_cls.primary_hue = "800" # Um tom de marrom mais forte e escuro
+        
         self.initialize_database()
         self._register_fonts()
         Window.clearcolor = self.APP_BG_COLOR
@@ -502,7 +510,7 @@ class RootsApp(MDApp):
 
     def render_time_chart(self):
         """
-        Gráfico ÚNICO: TEMPO de leitura na semana atual (Dom->Sáb).
+        Gráfico ÚNICO: TEMPO de leitura na semana atual (Dom-Sáb).
         Usa sessoes_leitura(duracao_seg) somando por dia.
         Eixo Y em MINUTOS (0..240), com ticks de 30 em 30.
 
@@ -546,12 +554,12 @@ class RootsApp(MDApp):
             ys.append(mins)
             d += timedelta(days=1)
 
-        # Escala fixa 0..240 min (4h), ticks de 30
-        y_max = 240
+        # Escala fixa 0..180 min (3h), ticks de 30
+        y_max = 120
         y_tick = 30
 
         # Título
-        box.add_widget(MDLabel(text="Tempo de leitura (min) — semana atual (Dom→Sáb)",
+        box.add_widget(MDLabel(text="Tempo de leitura (min) — semana atual (Dom->Sáb)",
                                halign="center", size_hint_y=None, height=dp(24), bold=True))
 
         if not HAS_GRAPH:
@@ -572,12 +580,15 @@ class RootsApp(MDApp):
         graph = Graph(
             xlabel='Dias', ylabel='Minutos',
             x_ticks_minor=0,
-            x_ticks_major=1,            # 1 dia por marca
+            x_ticks_major=1,
             y_ticks_major=y_tick,
+            y_grid_label=True, 
             x_grid=True, y_grid=True,
-            xmin=-0.5, xmax=6.5,        # 7 dias
+            xmin=-0.5, xmax=6.5,
             ymin=0, ymax=y_max,
             size_hint=(1, None), height=dp(260),
+            # Adicionando um preenchimento à esquerda para dar espaço aos números
+            padding=dp(25)
         )
 
         # ---------------- BARRAS (stems) ----------------
