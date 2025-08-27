@@ -2,8 +2,9 @@ import sqlite3
 import os.path
 import re
 import html
-from datetime import date, timedelta
-from kivy.properties import StringProperty, NumericProperty, BooleanProperty, OptionProperty
+from datetime import date, timedelta, datetime
+
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.clock import Clock
 from kivy.network.urlrequest import UrlRequest
 from urllib.parse import quote_plus
@@ -14,37 +15,40 @@ from kivymd.toast import toast
 from kivymd.app import MDApp
 from kivy.lang import Builder
 from kivy.uix.screenmanager import Screen
-from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.list import TwoLineAvatarIconListItem, IconRightWidget
 from functools import partial
 from kivy.metrics import dp
 from kivy.loader import Loader
-from pathlib import Path
 from kivy.core.text import LabelBase
 from kivy.resources import resource_add_path
 from kivy.core.window import Window
+from kivymd.uix.menu import MDDropdownMenu
 
+# ---------- Graph (kivy-garden.graph) ----------
 try:
-    from kivy_garden.graph import Graph, MeshLinePlot
+    # Agora importamos também o MeshStemPlot para "barras"
+    from kivy_garden.graph import Graph, MeshLinePlot, MeshStemPlot
     HAS_GRAPH = True
 except Exception:
     HAS_GRAPH = False
 
-from kivymd.uix.menu import MDDropdownMenu
 
+# ===================== SCREENS =====================
 class NoteDetailScreen(Screen):
     note_id = NumericProperty(0)
     book_id = StringProperty("")
     book_title = StringProperty("")
     note_text = StringProperty("")
 
+
 class NoteEditorScreen(Screen):
     note_id = NumericProperty(0)   # 0 = nova
     book_id = StringProperty("")
     book_title = StringProperty("")
     note_text = StringProperty("")
+
 
 class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
@@ -69,6 +73,10 @@ class NotesScreen(Screen):
     notes_book_title = StringProperty("Selecionar livro")
 
 
+class TimerScreen(Screen):
+    pass
+
+
 class BookDetailScreen(Screen):
     book_id = StringProperty('')
     book_title = StringProperty('')
@@ -82,11 +90,39 @@ class BookDetailScreen(Screen):
     progress_percent = NumericProperty(0)
 
 
+# ===================== APP =====================
 class RootsApp(MDApp):
     APP_BG_COLOR = (146/255, 216/255, 255/255, 1)
 
+        # --- MENU DE STATUS NO DETALHE DO LIVRO ---
+    def open_status_menu(self, caller):
+        # Cria (ou reusa) o dropdown preso ao botão de 3 pontos do AppBar
+        try:
+            # Fecha menu anterior, se existir
+            if hasattr(self, "_status_menu") and self._status_menu:
+                self._status_menu.dismiss()
+        except Exception:
+            pass
+
+        items = [
+            {"text": "Quero ler", "on_release": lambda: (self.set_status_from_ui("Quero ler"), self._dismiss_status_menu())},
+            {"text": "Lendo",     "on_release": lambda: (self.set_status_from_ui("Lendo"),     self._dismiss_status_menu())},
+            {"text": "Lido",      "on_release": lambda: (self.set_status_from_ui("Lido"),      self._dismiss_status_menu())},
+        ]
+        self._status_menu = MDDropdownMenu(caller=caller, items=items, width_mult=3)
+        self._status_menu.open()
+
+    def _dismiss_status_menu(self):
+        if hasattr(self, "_status_menu") and self._status_menu:
+            try:
+                self._status_menu.dismiss()
+            except Exception:
+                pass
+            self._status_menu = None
+
+
+    # ------------------ FONTS ------------------
     def _register_fonts(self):
-        import os
         try:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             fonts_dir = os.path.join(base_dir, "fonts")
@@ -106,28 +142,33 @@ class RootsApp(MDApp):
             print("[Fonts] Falha ao registrar fontes:", e)
 
     # ------------------ NAV ------------------
-
     def go_home(self):
         self.root.current = 'main_screen'
 
     def go_graph(self):
         self.root.current = 'graph_screen'
-        # desenha/atualiza o gráfico quando entrar
-        self.render_reading_chart(days=7)
+        # Renderiza o gráfico de TEMPO (único)
+        Clock.schedule_once(lambda *_: self.render_time_chart(), 0)
 
     def go_notes(self):
         self.root.current = 'notes_screen'
-        # carrega as anotações quando entrar
         self.load_notes()
 
+    def go_timer(self):
+        self.root.current = 'timer_screen'
+        try:
+            ts = self.root.get_screen('timer_screen')
+            if not getattr(self, "_timer_running", False):
+                ts.ids.timer_label.text = "00:00:00"
+        except Exception:
+            pass
+
     def on_back_from_search(self):
-        """Sai do modo busca na home e recarrega a biblioteca salva."""
         sm = self.root.get_screen('main_screen')
         sm.show_back = False
         self.load_saved_books()
 
     # ------------------ UTILS ------------------
-
     def notify(self, msg: str):
         try:
             toast(msg)
@@ -148,7 +189,6 @@ class RootsApp(MDApp):
         return html.unescape(s).strip()
 
     # ------------------ APP LIFECYCLE ------------------
-
     def build(self):
         self.initialize_database()
         self._register_fonts()
@@ -172,8 +212,7 @@ class RootsApp(MDApp):
                 pagina_atual INTEGER DEFAULT 0,
                 nota INTEGER DEFAULT 0,
                 genero_id INTEGER,
-                descricao TEXT,
-                FOREIGN KEY (genero_id) REFERENCES generos(id)
+                descricao TEXT
             )
         """)
 
@@ -188,8 +227,7 @@ class RootsApp(MDApp):
             CREATE TABLE IF NOT EXISTS progresso_diario (
                 livro_id TEXT,
                 data TEXT,
-                paginas_lidas INTEGER,
-                FOREIGN KEY (livro_id) REFERENCES livros(id)
+                paginas_lidas INTEGER
             )
         """)
 
@@ -197,8 +235,19 @@ class RootsApp(MDApp):
             CREATE TABLE IF NOT EXISTS anotacoes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 livro_id TEXT,
-                texto TEXT,
-                FOREIGN KEY (livro_id) REFERENCES livros(id)
+                texto TEXT
+            )
+        """)
+
+        # ATENÇÃO: livro_id sem NOT NULL para evitar erro ao salvar sessão sem escolher livro
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessoes_leitura (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                livro_id TEXT,
+                inicio TEXT NOT NULL,
+                fim TEXT NOT NULL,
+                duracao_seg INTEGER NOT NULL,
+                dia TEXT NOT NULL
             )
         """)
 
@@ -207,12 +256,10 @@ class RootsApp(MDApp):
 
     def on_start(self):
         self.load_saved_books()
-        # Pré-renderiza dados das outras telas (opcional)
-        self.render_reading_chart(days=7)
         self.load_notes()
+        # (gráfico só quando abre a tela de gráficos)
 
-    # ------------------ DETALHES ------------------
-
+    # ------------------ DETALHES (livro) ------------------
     def is_book_saved(self, book_id, title, authors) -> bool:
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
@@ -226,7 +273,6 @@ class RootsApp(MDApp):
     def open_book_detail(self, book_id, title, authors, cover_url, page_count, description=''):
         detail = self.root.get_screen('detail_screen')
 
-        # Preenche o mínimo para abrir a tela já renderizada
         detail.book_id = book_id
         detail.book_title = title
         detail.authors = authors
@@ -235,19 +281,12 @@ class RootsApp(MDApp):
         detail.description = description or ''
         detail.already_added = self.is_book_saved(book_id, title, authors)
 
-        # Progresso básico enquanto carrega
-        if detail.already_added:
-            # mantém o que já tem salvo numa visita anterior (se houver), senão zera
-            pass
-        else:
+        if not detail.already_added:
             detail.pages_read = 0
             detail.book_status = 'Quero ler'
         self._refresh_detail_progress()
 
-        # Mostra a tela imediatamente
         self.root.current = 'detail_screen'
-
-        # Hidrata com DB no próximo frame (fora do caminho da animação)
         Clock.schedule_once(lambda *_: self._hydrate_detail_from_db(book_id), 0)
 
     def _hydrate_detail_from_db(self, book_id):
@@ -261,8 +300,8 @@ class RootsApp(MDApp):
         try:
             cur.execute("""
                 SELECT COALESCE(pagina_atual,0),
-                    COALESCE(status,'Quero ler'),
-                    COALESCE(qtde_paginas,0)
+                       COALESCE(status,'Quero ler'),
+                       COALESCE(qtde_paginas,0)
                 FROM livros WHERE id = ?
             """, (book_id,))
             row = cur.fetchone()
@@ -275,7 +314,6 @@ class RootsApp(MDApp):
             if (row[2] or 0) > 0:
                 detail.page_count = int(row[2])
             self._refresh_detail_progress()
-
 
     def save_from_detail(self):
         def _do_save(*_):
@@ -295,7 +333,6 @@ class RootsApp(MDApp):
         Clock.schedule_once(_do_save, 0)
 
     # ------------------ BUSCA ------------------
-
     def add_book_search(self, query):
         sm = self.root.get_screen('main_screen')
         books_grid = sm.ids.books_grid
@@ -308,7 +345,7 @@ class RootsApp(MDApp):
             return
 
         sm.show_back = True
-        
+
         api_url = (
             "https://www.googleapis.com/books/v1/volumes"
             f"?q={quote_plus(q)}"
@@ -320,7 +357,6 @@ class RootsApp(MDApp):
 
         seen_ids = set()
         seen_title_author = set()
-
 
         def ok(req, result):
             added = 0
@@ -342,8 +378,6 @@ class RootsApp(MDApp):
                     continue
                 ta_key = f"{self._normalize_text(title)}|{self._normalize_text(authors)}"
                 if ta_key in seen_title_author:
-                    continue
-                if not cover_url:
                     continue
 
                 if book_id:
@@ -375,7 +409,6 @@ class RootsApp(MDApp):
         UrlRequest(api_url, on_success=ok, on_error=fail, on_failure=fail, decode=True)
 
     # ------------------ DB: livros ------------------
-
     def save_book_to_database(self, book_id, title, authors, cover_url, page_count, description=''):
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -456,114 +489,133 @@ class RootsApp(MDApp):
         finally:
             conn.close()
 
-    # ------------------ GRÁFICO ------------------
+    # ------------------ GRÁFICO: TEMPO DE LEITURA ------------------
+    def _week_range_sun_sat(self):
+        """
+        Retorna (start, end) da semana DOM->SÁB da data atual.
+        """
+        today = date.today()
+        days_since_sun = (today.weekday() + 1) % 7  # dom -> 0
+        start = today - timedelta(days=days_since_sun)
+        end = start + timedelta(days=6)
+        return start, end
 
-    def render_reading_chart(self, days=7):
+    def render_time_chart(self):
+        """
+        Gráfico ÚNICO: TEMPO de leitura na semana atual (Dom->Sáb).
+        Usa sessoes_leitura(duracao_seg) somando por dia.
+        Eixo Y em MINUTOS (0..240), com ticks de 30 em 30.
+
+        **Atualizado para BARRAS** usando MeshStemPlot.
+        """
         from kivymd.uix.boxlayout import MDBoxLayout
         from kivymd.uix.label import MDLabel
-        # se você já importou dp no topo (kivy.metrics import dp), pode usar direto aqui
 
-        gs = self.root.get_screen('graph_screen')
-        box = gs.ids.chart_box
+        try:
+            gs = self.root.get_screen('graph_screen')
+            box = gs.ids.chart_time
+        except Exception:
+            return
+
         box.clear_widgets()
 
-        end = date.today()
-        start = end - timedelta(days=days - 1)
+        start, end = self._week_range_sun_sat()
 
-        # Busca dados agregados por dia
+        # Busca sessões e soma por dia (em segundos)
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT date(data) AS d, SUM(COALESCE(paginas_lidas, 0)) AS pag
-            FROM progresso_diario
-            WHERE date(data) BETWEEN ? AND ?
-            GROUP BY date(data)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT date(COALESCE(dia, inicio)) AS d,
+                   SUM(COALESCE(duracao_seg, 0)) AS segs
+            FROM sessoes_leitura
+            WHERE date(COALESCE(dia, inicio)) BETWEEN ? AND ?
+            GROUP BY date(COALESCE(dia, inicio))
             ORDER BY d
         """, (start.isoformat(), end.isoformat()))
-        rows = dict(cursor.fetchall())
+        rows = dict(cur.fetchall())
         conn.close()
 
-        # Monta série contínua
-        xs, ys, dates = [], [], []
+        # Monta séries contínuas (0..6) em MINUTOS
+        xs, ys = [], []
         d = start
-        i = 0
-        while d <= end:
+        for i in range(7):
             xs.append(i)
-            ys.append(int(rows.get(d.isoformat(), 0)))
-            dates.append(d)
-            i += 1
+            secs = int(rows.get(d.isoformat(), 0))
+            mins = secs // 60
+            ys.append(mins)
             d += timedelta(days=1)
 
-        total = sum(ys)
-        avg = (total / len(ys)) if ys else 0.0
+        # Escala fixa 0..240 min (4h), ticks de 30
+        y_max = 240
+        y_tick = 30
 
-        # Caso não tenha o garden.graph instalado
+        # Título
+        box.add_widget(MDLabel(text="Tempo de leitura (min) — semana atual (Dom→Sáb)",
+                               halign="center", size_hint_y=None, height=dp(24), bold=True))
+
         if not HAS_GRAPH:
+            total = sum(ys)
+            media = total / 7.0 if ys else 0.0
             box.add_widget(MDLabel(
-                text=(f"Gráfico indisponível (instale kivy-garden + garden graph).\n\n"
-                    f"Últimos {days} dias — Total: {total} | Média/dia: {avg:.1f}"),
-                halign="center"
+                text=f"Instale kivy-garden + garden graph para ver o gráfico.\nMédia: {media:.1f} min/dia",
+                halign="center",
+                size_hint_y=None, height=dp(50)
             ))
-            # Linha de rótulos dos dias da semana (fallback visual)
-            row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=0)
-            pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-            for dt in dates:
-                row.add_widget(MDLabel(text=pt[dt.weekday()], halign='center'))
+            # Rótulos DOM..SÁB (fallback)
+            row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20))
+            for label in ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]:
+                row.add_widget(MDLabel(text=label, halign='center'))
             box.add_widget(row)
             return
 
-        # ----- Com o Graph -----
-        # Margem de topo para caber a linha de média com folga
-        y_max_base = max(ys + [avg]) if ys else 1
-        # dá um “respiro” no topo
-        y_max = max(1, int(round(y_max_base + max(1, y_max_base * 0.15))))
-        y_tick = max(1, int(round(y_max / 5)))
-
         graph = Graph(
-            xlabel='Dias', ylabel='Páginas',
+            xlabel='Dias', ylabel='Minutos',
             x_ticks_minor=0,
-            x_ticks_major=1,          # 1 dia por marca
+            x_ticks_major=1,            # 1 dia por marca
             y_ticks_major=y_tick,
             x_grid=True, y_grid=True,
-            xmin=-0.5, xmax=(len(xs) - 0.5) if xs else 0.5,
+            xmin=-0.5, xmax=6.5,        # 7 dias
             ymin=0, ymax=y_max,
-            size_hint=(1, None), height=dp(240),
+            size_hint=(1, None), height=dp(260),
         )
 
-        # Série de leitura (páginas/dia)
-        line = MeshLinePlot(color=[0, 0.4, 1, 1])
-        line.points = list(zip(range(len(ys)), ys))
-        graph.add_plot(line)
+        # ---------------- BARRAS (stems) ----------------
+        # Cada ponto (x, y) gera uma "haste" do zero até y -> efeito de barra.
+        try:
+            bar_plot = MeshStemPlot(color=[0, 0.4, 1, 1])
+            bar_plot.points = list(zip(xs, ys))
+            graph.add_plot(bar_plot)
+        except Exception:
+            # fallback: se por algum motivo MeshStemPlot não existir, usa linha
+            line_fallback = MeshLinePlot(color=[0, 0.4, 1, 1])
+            line_fallback.points = list(zip(xs, ys))
+            graph.add_plot(line_fallback)
 
-        # Linha de MÉDIA horizontal
+        # Linha da média (em minutos)
+        media = sum(ys) / 7.0 if ys else 0.0
         avg_plot = MeshLinePlot(color=[1, 0, 0, 1])
-        avg_plot.points = [(x, avg) for x in range(len(ys))]
+        avg_plot.points = [(x, media) for x in xs]
         graph.add_plot(avg_plot)
 
         box.add_widget(graph)
 
-        # Rótulos com dias da semana alinhados abaixo do gráfico
-        row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20), spacing=0, padding=(dp(8), 0))
-        pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-        for dt in dates:
-            # cada label ocupa a mesma fração da largura
-            lbl = MDLabel(text=pt[dt.weekday()], halign='center')
-            row.add_widget(lbl)
+        # Rótulos DOM..SÁB alinhados
+        row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20))
+        for label in ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]:
+            row.add_widget(MDLabel(text=label, halign='center'))
         box.add_widget(row)
 
-        # Mostra a média num texto auxiliar
+        # Texto auxiliar da média
         box.add_widget(MDLabel(
-            text=f"Média: {avg:.1f} pág/dia",
+            text=f"Média: {media:.1f} min/dia",
             halign="center",
             size_hint_y=None,
-            height=dp(20),
+            height=dp(22),
             theme_text_color="Secondary"
         ))
 
-
-      # ------------------ ANOTAÇÕES (NOVO FLUXO) ------------------
-
+    # ------------------ ANOTAÇÕES ------------------
     def open_book_picker(self):
         ns = self.root.get_screen('notes_screen')
         btn = ns.ids.book_select_btn
@@ -575,24 +627,12 @@ class RootsApp(MDApp):
         books = cursor.fetchall()
         conn.close()
 
-        items = [
-        {
-            "text": "Todos",
-            "on_release": lambda: self._pick_book_for_note("", "Todos"),
-        }
-        ]
-        
+        items = [{"text": "Todos", "on_release": lambda: self._pick_book_for_note("", "Todos")}]
         if books:
             items += [{
                 "text": title,
                 "on_release": (lambda b_id=bid, t=title: self._pick_book_for_note(b_id, t))
             } for bid, title in books]
-        else:
-            items += [{
-                "text": "Todos",
-                "on_release": lambda: self._pick_book_for_note("", "Todos")
-            }]
-
 
         self._notes_menu = MDDropdownMenu(caller=btn, items=items, width_mult=4)
         self._notes_menu.open()
@@ -605,13 +645,11 @@ class RootsApp(MDApp):
             self._notes_menu.dismiss()
 
     def apply_notes_filter(self):
-        """Filtra a lista de notas pelo livro selecionado."""
         ns = self.root.get_screen('notes_screen')
         bid = (ns.notes_book_id or "").strip()
         self.load_notes(filter_book_id=bid if bid else None)
 
     def create_note_for_selected_book(self):
-        """Abre o editor para criar nota do livro selecionado."""
         ns = self.root.get_screen('notes_screen')
         bid = (ns.notes_book_id or "").strip()
         if not bid:
@@ -620,7 +658,6 @@ class RootsApp(MDApp):
         self.open_note_editor(note_id=0, book_id=bid, book_title=ns.notes_book_title, note_text="")
 
     def load_notes(self, filter_book_id=None):
-        """Carrega a lista de notas. Se filter_book_id for dado, filtra por livro."""
         ns = self.root.get_screen('notes_screen')
         lst = ns.ids.notes_list
         lst.clear_widgets()
@@ -652,26 +689,12 @@ class RootsApp(MDApp):
                 preview = preview[:80] + "…"
 
             item = TwoLineAvatarIconListItem(text=book_title, secondary_text=preview)
-
-            # abrir detalhe ao tocar no item
             item.bind(on_release=partial(self.open_note_detail, note_id))
-
-            # ícone editar
-            item.add_widget(
-                IconRightWidget(icon="pencil", on_release=partial(self.open_note_editor, note_id))
-            )
-            # ícone apagar
-            item.add_widget(
-                IconRightWidget(icon="delete", on_release=partial(self.delete_note_confirm, note_id))
-            )
-
+            item.add_widget(IconRightWidget(icon="pencil", on_release=partial(self.open_note_editor, note_id)))
+            item.add_widget(IconRightWidget(icon="delete", on_release=partial(self.delete_note_confirm, note_id)))
             lst.add_widget(item)
 
-
-    # ---- Detalhar / Editar / Apagar ----
-
     def open_note_detail(self, note_id, *args):
-        """Abre tela com a anotação completa."""
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -696,11 +719,6 @@ class RootsApp(MDApp):
         self.root.current = 'note_detail'
 
     def open_note_editor(self, note_id=0, *args, book_id="", book_title="", note_text=""):
-        """
-        Abre o editor.
-        - Se note_id > 0 -> carrega do DB
-        - Se note_id == 0 -> usa (book_id, book_title) recebidos
-        """
         editor = self.root.get_screen('note_editor')
 
         if note_id:
@@ -728,12 +746,10 @@ class RootsApp(MDApp):
             editor.book_id = book_id or ""
             editor.book_title = book_title or "Sem livro"
 
-        # coloca o texto no campo
         editor.ids.editor_text.text = editor.note_text
         self.root.current = 'note_editor'
 
     def save_note_from_editor(self):
-        """Salva criação/edição a partir da tela NoteEditor."""
         editor = self.root.get_screen('note_editor')
         text = (editor.ids.editor_text.text or "").strip()
         if not text:
@@ -768,12 +784,10 @@ class RootsApp(MDApp):
             return
         conn.close()
 
-        # Atualiza lists e abre detalhe
         self.load_notes()
         self.open_note_detail(note_id)
 
     def delete_note_confirm(self, note_id, *args):
-        """Confirma exclusão e apaga a nota."""
         self._pending_delete_note_id = int(note_id)
 
         def _do_delete(*_):
@@ -794,11 +808,12 @@ class RootsApp(MDApp):
             conn.close()
             self.notify("Anotação apagada.")
             self._pending_delete_note_id = 0
-            # Se estava no detalhe, volta para lista
             if self.root.current == 'note_detail':
                 self.go_notes()
             else:
                 self.load_notes()
+
+            self._dismiss_delete_dialog()
 
         self._delete_dialog = MDDialog(
             title="Apagar anotação",
@@ -816,24 +831,19 @@ class RootsApp(MDApp):
             dlg.dismiss()
         self._delete_dialog = None
 
-        # ------------------ STATUS ------------------
-
+    # ------------------ STATUS / PROGRESSO ------------------
     def status_db_to_ui(self, s: str) -> str:
-        # DB → UI
         m = {"Concluído": "Lido", "Lendo": "Lendo", "Quero ler": "Quero ler"}
         return m.get((s or "").strip(), "Quero ler")
 
     def status_ui_to_db(self, s: str) -> str:
-        # UI → DB
         m = {"Lido": "Concluído", "Lendo": "Lendo", "Quero ler": "Quero ler"}
         return m.get((s or "").strip(), "Quero ler")
 
-    # Para usar no KV (comparações)
     def status_ui(self, status_db: str) -> str:
         return self.status_db_to_ui(status_db)
-    
+
     def set_status_from_ui(self, ui_status: str):
-        """Usuário escolheu 'Quero ler' | 'Lendo' | 'Lido' na UI."""
         detail = self.root.get_screen('detail_screen')
         if not detail.already_added:
             self.notify("Adicione o livro primeiro.")
@@ -841,44 +851,68 @@ class RootsApp(MDApp):
 
         s_db = self.status_ui_to_db(ui_status)
         pc = int(detail.page_count or 0)
-        self.update_book_status(s_db, pc, detail) 
+        self.update_book_status(s_db, pc, detail)
 
-    def update_book_status(self, s_db, pc, detail):
-        """
-        s_db: 'Quero ler' | 'Lendo' | 'Concluído' (formato do DB)
-        pc: total de páginas (int)
-        detail: a tela BookDetailScreen atual
-        """
-        if s_db == "Concluído" and pc > 0:
-            # marca como lido -> 100 %
-            self.update_book_progress(pc)
-            return
-        if s_db == "Quero ler":
-            # zera o progresso
-            self.update_book_progress(0)
-            return
-        
-        # "Lendo": só muda o status, mantém páginas
+    def update_book_progress(self, new_pages_read: int):
+        detail = self.root.get_screen('detail_screen')
+        pc = int(detail.page_count or 0)
+        old_pages = int(detail.pages_read or 0)
+
+        # Garante que o novo valor de páginas lidas esteja dentro dos limites (0 a page_count)
+        if pc > 0:
+            new_pages = max(0, min(int(new_pages_read or 0), pc))
+        else:
+            new_pages = 0
+
+        # Define o status com base no novo número de páginas
+        if new_pages <= 0:
+            status = 'Quero ler'
+            new_pages = 0
+        elif pc > 0 and new_pages >= pc:
+            status = 'Concluído'
+            new_pages = pc
+        else:
+            status = 'Lendo'
+
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         try:
-            cur.execute("UPDATE livros SET status = ? WHERE id = ?", (s_db, detail.book_id))
+            # 1. Salva o estado principal (página e status) SEMPRE.
+            cur.execute(
+                "UPDATE livros SET pagina_atual = ?, status = ? WHERE id = ?",
+                (new_pages, status, detail.book_id)
+            )
+
+            # 2. Calcula o delta e salva o progresso diário APENAS se for um avanço.
+            delta = new_pages - old_pages
+            if delta > 0:
+                today = date.today().isoformat()
+                # Usamos INSERT OR IGNORE e UPDATE para lidar com o registro diário
+                cur.execute(
+                    "INSERT OR IGNORE INTO progresso_diario (livro_id, data, paginas_lidas) VALUES (?, ?, 0)",
+                    (detail.book_id, today)
+                )
+                cur.execute(
+                    "UPDATE progresso_diario SET paginas_lidas = paginas_lidas + ? WHERE livro_id = ? AND data = ?",
+                    (delta, detail.book_id, today)
+                )
+            
             conn.commit()
+
         except sqlite3.Error as e:
-            print("Erro ao atualizar status:", e)
-            self.notify("Não consegui salvar o status.")
+            print("Erro ao atualizar progresso:", e)
+            self.notify("Não consegui salvar o progresso.")
         finally:
             conn.close()
 
-        detail.book_status = s_db
-        self._refresh_detail_progress()
-        self.notify(f"Status atualizado para {self.status_db_to_ui(s_db)}.")
-
-        # ------------------ PROGRESSO ------------------
+        # Atualiza as propriedades da tela para refletir a mudança imediatamente
+        detail.pages_read = new_pages
+        detail.book_status = status
+        self._refresh_detail_progress()  # Recalcula a porcentagem e atualiza a UI
+        self.notify("Progresso atualizado.")
 
     def _refresh_detail_progress(self):
-        """Recalcula a % e ajusta status básico."""
         detail = self.root.get_screen('detail_screen')
         pc = int(detail.page_count or 0)
         pr = int(detail.pages_read or 0)
@@ -889,7 +923,6 @@ class RootsApp(MDApp):
         detail.pages_read = pr
         detail.progress_percent = int(round((pr / pc) * 100))
 
-        # Regras simples de status (não força se usuário setou algo manualmente)
         if pr == 0:
             detail.book_status = 'Quero ler'
         elif pr >= pc:
@@ -899,7 +932,6 @@ class RootsApp(MDApp):
                 detail.book_status = 'Lendo'
 
     def prompt_update_progress(self):
-        """Abre um diálogo para digitar as páginas lidas e salvar."""
         detail = self.root.get_screen('detail_screen')
         if not detail.already_added:
             self.notify("Adicione o livro para acompanhar o progresso.")
@@ -938,13 +970,11 @@ class RootsApp(MDApp):
         self.update_book_progress(new_val)
 
     def update_book_progress(self, new_pages_read: int):
-        """Atualiza paginas/status no DB, grava progresso do dia (data local) e reflete na UI."""
         detail = self.root.get_screen('detail_screen')
         pc = int(detail.page_count or 0)
         old_pages = int(detail.pages_read or 0)
         new_pages = max(0, min(int(new_pages_read or 0), pc))
 
-        # Status automático
         if new_pages == 0:
             status = 'Quero ler'
         elif pc > 0 and new_pages >= pc:
@@ -956,13 +986,11 @@ class RootsApp(MDApp):
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         try:
-            # Atualiza livro
             cur.execute(
                 "UPDATE livros SET pagina_atual = ?, status = ? WHERE id = ?",
                 (new_pages, status, detail.book_id)
             )
 
-            # Log diário (apenas crescimento) — usando DATA LOCAL (sem UTC)
             delta = max(0, new_pages - old_pages)
             if delta > 0:
                 today = date.today().isoformat()
@@ -977,20 +1005,101 @@ class RootsApp(MDApp):
         finally:
             conn.close()
 
-        # Reflete na UI e no gráfico
         detail.pages_read = new_pages
         detail.book_status = status
         self._refresh_detail_progress()
-        self.render_reading_chart(days=7)  # mantém a tela de gráficos coerente
         self.notify("Progresso atualizado.")
 
+    # ------------------ CRONÔMETRO ------------------
+    _timer_event = None
+    _timer_running = False
+    _timer_start_ts = 0
 
-        # Reflete na UI
-        detail.pages_read = new_pages
-        detail.book_status = status
-        self._refresh_detail_progress()
-        self.render_reading_chart(days=7)  # mantém a tela de gráficos coerente
-        self.notify("Progresso atualizado.")
+    def _fmt_hhmmss(self, secs: int) -> str:
+        secs = max(0, int(secs))
+        h = secs // 3600
+        m = (secs % 3600) // 60
+        s = secs % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def start_timer(self):
+        if self._timer_running:
+            return
+        self._timer_running = True
+        from time import time
+        self._timer_start_ts = int(time())
+        if self._timer_event:
+            try:
+                self._timer_event.cancel()
+            except Exception:
+                pass
+        self._timer_event = Clock.schedule_interval(self._tick_timer, 1)
+        self.notify("Cronômetro iniciado.")
+
+    def _tick_timer(self, dt):
+        try:
+            from time import time
+            elapsed = int(time()) - int(self._timer_start_ts or 0)
+            ts = self.root.get_screen('timer_screen')
+            ts.ids.timer_label.text = self._fmt_hhmmss(elapsed)
+        except Exception:
+            pass
+
+    def stop_timer(self):
+        if not self._timer_running:
+            return
+        self._timer_running = False
+        if self._timer_event:
+            try:
+                self._timer_event.cancel()
+            except Exception:
+                pass
+            self._timer_event = None
+        self.notify("Cronômetro parado.")
+
+    def save_timer(self):
+        """Salva a sessão do cronômetro em sessoes_leitura e atualiza o gráfico se estiver na aba."""
+        ts = self.root.get_screen('timer_screen')
+        txt = ts.ids.timer_label.text.strip() if 'timer_label' in ts.ids else "00:00:00"
+        try:
+            h, m, s = [int(x) for x in txt.split(":")]
+            duracao = h * 3600 + m * 60 + s
+        except Exception:
+            duracao = 0
+
+        if duracao <= 0:
+            self.notify("Nada para salvar.")
+            return
+
+        now = datetime.now()
+        inicio = now.strftime("%Y-%m-%d %H:%M:%S")
+        fim = inicio
+        dia = now.date().isoformat()
+
+        db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            # livro_id pode ficar vazio
+            cur.execute("""
+                INSERT INTO sessoes_leitura (livro_id, inicio, fim, duracao_seg, dia)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("", inicio, fim, int(duracao), dia))
+            conn.commit()
+        except Exception as e:
+            print("Erro ao salvar sessão:", e)
+            self.notify("Falha ao salvar sessão.")
+            conn.close()
+            return
+        conn.close()
+
+        ts.ids.timer_label.text = "00:00:00"
+        self.notify("Sessão salva.")
+
+        # Se o usuário estiver na tela de gráficos, atualiza na hora
+        if self.root.current == 'graph_screen':
+            self.render_time_chart()
+
 
 if __name__ == "__main__":
     RootsApp().run()
