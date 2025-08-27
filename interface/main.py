@@ -289,13 +289,39 @@ class RootsApp(MDApp):
         detail.description = description or ''
         detail.already_added = self.is_book_saved(book_id, title, authors)
 
-        if not detail.already_added:
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pega os widgets pelo ID que definimos no arquivo .kv
+        progress_layout = detail.ids.progress_layout
+        separator = detail.ids.separator
+
+        # Lógica para mostrar ou esconder a barra de progresso
+        if detail.already_added:
+            # Se o livro está na biblioteca, mostra a barra e o separador
+            progress_layout.opacity = 1
+            progress_layout.height = progress_layout.minimum_height
+            progress_layout.size_hint_y = None
+            
+            separator.opacity = 1
+            separator.height = dp(1)
+            
+            # Carrega os dados do banco de dados
+            Clock.schedule_once(lambda *_: self._hydrate_detail_from_db(book_id), 0)
+        else:
+            # Se o livro NÃO está na biblioteca, esconde a barra e o separador
+            progress_layout.opacity = 0
+            progress_layout.height = 0
+            progress_layout.size_hint_y = None
+
+            separator.opacity = 0
+            separator.height = 0
+            
+            # Reseta os valores para um livro não salvo
             detail.pages_read = 0
             detail.book_status = 'Quero ler'
-        self._refresh_detail_progress()
+            self._refresh_detail_progress()
+        # --- FIM DA CORREÇÃO ---
 
         self.root.current = 'detail_screen'
-        Clock.schedule_once(lambda *_: self._hydrate_detail_from_db(book_id), 0)
 
     def _hydrate_detail_from_db(self, book_id):
         detail = self.root.get_screen('detail_screen')

@@ -30,8 +30,8 @@
             source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
             size_hint: 1, 1
             pos_hint: {"x": 0, "y": 0}
-            allow_stretch: True
-            keep_ratio: True
+            # CORREÇÃO: Usa a propriedade moderna 'fit_mode'
+            fit_mode: "contain"
 
         MDIconButton:
             icon: "delete"
@@ -314,8 +314,7 @@ ScreenManager:
                         source: root.cover_url if root.cover_url else "data/logo/kivy-icon-256.png"
                         size_hint: None, None
                         size: dp(110), dp(160)
-                        allow_stretch: True
-                        keep_ratio: True
+                        fit_mode: "contain"
 
                     MDBoxLayout:
                         orientation: "vertical"
