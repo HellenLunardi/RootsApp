@@ -93,6 +93,7 @@ class BookDetailScreen(Screen):
 # ===================== APP =====================
 class RootsApp(MDApp):
     APP_BG_COLOR = get_color_from_hex("#1b2c3c")
+    READING_GOAL_MIN_PER_DAY = 6  # meta diária (min). Ajuste se quiser.
 
         # --- MENU DE STATUS NO DETALHE DO LIVRO ---
     def open_status_menu(self, caller):
@@ -537,13 +538,12 @@ class RootsApp(MDApp):
     def render_time_chart(self):
         """
         Gráfico ÚNICO: TEMPO de leitura na semana atual (Dom-Sáb).
-        Usa sessoes_leitura(duracao_seg) somando por dia.
-        Eixo Y em MINUTOS (0..240), com ticks de 30 em 30.
-
-        **Atualizado para BARRAS** usando MeshStemPlot.
+        Usa os recursos do próprio Graph para desenhar os rótulos dos dias,
+        garantindo o alinhamento perfeito.
         """
         from kivymd.uix.boxlayout import MDBoxLayout
         from kivymd.uix.label import MDLabel
+        from kivymd.uix.card import MDSeparator
 
         try:
             gs = self.root.get_screen('graph_screen')
@@ -555,7 +555,6 @@ class RootsApp(MDApp):
 
         start, end = self._week_range_sun_sat()
 
-        # Busca sessões e soma por dia (em segundos)
         db_path = os.path.join(self.user_data_dir, "db", "roots.db")
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
@@ -570,7 +569,6 @@ class RootsApp(MDApp):
         rows = dict(cur.fetchall())
         conn.close()
 
-        # Monta séries contínuas (0..6) em MINUTOS
         xs, ys = [], []
         d = start
         for i in range(7):
@@ -580,70 +578,66 @@ class RootsApp(MDApp):
             ys.append(mins)
             d += timedelta(days=1)
 
-        # Escala fixa 0..180 min (3h), ticks de 30
         y_max = 120
         y_tick = 30
 
-        # Título
         box.add_widget(MDLabel(text="Tempo de leitura (min) — semana atual (Dom->Sáb)",
                                halign="center", size_hint_y=None, height=dp(24), bold=True))
 
         if not HAS_GRAPH:
-            total = sum(ys)
-            media = total / 7.0 if ys else 0.0
-            box.add_widget(MDLabel(
-                text=f"Instale kivy-garden + garden graph para ver o gráfico.\nMédia: {media:.1f} min/dia",
-                halign="center",
-                size_hint_y=None, height=dp(50)
-            ))
-            # Rótulos DOM..SÁB (fallback)
-            row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20))
-            for label in ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]:
-                row.add_widget(MDLabel(text=label, halign='center'))
-            box.add_widget(row)
             return
-
+        
         graph = Graph(
-            xlabel='Dias', ylabel='Minutos',
+            xlabel='Dias',
+            ylabel='Minutos',
             x_ticks_minor=0,
-            x_ticks_major=1,
-            y_ticks_major=y_tick,
-            y_grid_label=True, 
-            x_grid=True, y_grid=True,
-            xmin=-0.5, xmax=6.5,
-            ymin=0, ymax=y_max,
-            size_hint=(1, None), height=dp(260),
-            # Adicionando um preenchimento à esquerda para dar espaço aos números
-            padding=dp(25)
+            y_ticks_major=y_tick, 
+            y_grid_label=True,
+            x_grid=True, 
+            y_grid=True,
+            xmin=-0.5, 
+            xmax=6.5,
+            ymin=0, 
+            ymax=y_max,
+            size_hint=(1, None), 
+            height=dp(260),
+            padding=dp(5) 
         )
 
-        # ---------------- BARRAS (stems) ----------------
-        # Cada ponto (x, y) gera uma "haste" do zero até y -> efeito de barra.
+        week_days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+        graph.x_ticks_major = 1  
+        graph.x_labels = [week_days[i] for i in range(7)] 
+
+
         try:
-            bar_plot = MeshStemPlot(color=[0, 0.4, 1, 1])
+            bar_plot = MeshStemPlot(color=self.theme_cls.primary_color)
             bar_plot.points = list(zip(xs, ys))
             graph.add_plot(bar_plot)
         except Exception:
-            # fallback: se por algum motivo MeshStemPlot não existir, usa linha
-            line_fallback = MeshLinePlot(color=[0, 0.4, 1, 1])
+            line_fallback = MeshLinePlot(color=self.theme_cls.primary_color)
             line_fallback.points = list(zip(xs, ys))
             graph.add_plot(line_fallback)
 
-        # Linha da média (em minutos)
         media = sum(ys) / 7.0 if ys else 0.0
-        avg_plot = MeshLinePlot(color=[1, 0, 0, 1])
+        avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7])
         avg_plot.points = [(x, media) for x in xs]
         graph.add_plot(avg_plot)
 
         box.add_widget(graph)
 
-        # Rótulos DOM..SÁB alinhados
-        row = MDBoxLayout(orientation='horizontal', size_hint_y=None, height=dp(20))
-        for label in ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]:
-            row.add_widget(MDLabel(text=label, halign='center'))
-        box.add_widget(row)
+        day_labels_layout = MDBoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(20),
+            padding=(dp(68), 0, dp(10), 0)
+        )
 
-        # Texto auxiliar da média
+        week_days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+        for label in week_days:
+            day_labels_layout.add_widget(MDLabel(text=label, halign='center'))
+
+        box.add_widget(day_labels_layout)
+
         box.add_widget(MDLabel(
             text=f"Média: {media:.1f} min/dia",
             halign="center",
@@ -651,6 +645,34 @@ class RootsApp(MDApp):
             height=dp(22),
             theme_text_color="Secondary"
         ))
+
+        box.add_widget(MDBoxLayout(size_hint_y=None, height=dp(20)))
+        box.add_widget(MDSeparator())
+        box.add_widget(MDBoxLayout(size_hint_y=None, height=dp(10)))
+
+        total_minutes = sum(ys)
+        max_minutes = max(ys) if ys else 0
+        min_minutes = min(ys) if ys else 0
+        
+        most_productive_day = week_days[ys.index(max_minutes)] if total_minutes > 0 else "Nenhum"
+        least_productive_day = week_days[ys.index(min_minutes)] if total_minutes > 0 else "Nenhum"
+
+        total_label = MDLabel(
+            text=f"Total de minutos lidos na semana: [b]{total_minutes}[/b]",
+            halign="center", size_hint_y=None, height=dp(20), markup=True
+        )
+        max_day_label = MDLabel(
+            text=f"Dia mais produtivo: [b]{most_productive_day}[/b] ({max_minutes} min)",
+            halign="center", size_hint_y=None, height=dp(20), markup=True
+        )
+        min_day_label = MDLabel(
+            text=f"Dia com menor leitura: [b]{least_productive_day}[/b] ({min_minutes} min)",
+            halign="center", size_hint_y=None, height=dp(20), markup=True
+        )
+
+        box.add_widget(total_label)
+        box.add_widget(max_day_label)
+        box.add_widget(min_day_label)
 
     # ------------------ ANOTAÇÕES ------------------
     def open_book_picker(self):
