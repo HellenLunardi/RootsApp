@@ -1174,25 +1174,24 @@ class RootsApp(MDApp):
         """
         Cria uma imagem de compartilhamento no estilo Strava, com fundo transparente.
         """
-        from PIL import Image, ImageDraw, ImageFont
         import webbrowser
         from kivy.core.window import Window
         from kivy.clock import Clock
         from kivy.metrics import dp
         from kivymd.uix.boxlayout import MDBoxLayout
         from kivymd.uix.label import MDLabel
-        from kivymd.uix.card import MDSeparator
         from kivy_garden.graph import Graph, MeshLinePlot, MeshStemPlot
 
         try:
-            # --- PARTE 1: Coletar os dados ---
+            # --- PARTE 1: Dados ---
             start, end = self._week_range_sun_sat()
             db_path = os.path.join(self.user_data_dir, "db", "roots.db")
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
             cur.execute("""
                 SELECT date(COALESCE(dia, inicio)) AS d, SUM(COALESCE(duracao_seg, 0)) AS segs
-                FROM sessoes_leitura WHERE date(COALESCE(dia, inicio)) BETWEEN ? AND ?
+                FROM sessoes_leitura 
+                WHERE date(COALESCE(dia, inicio)) BETWEEN ? AND ?
                 GROUP BY date(COALESCE(dia, inicio)) ORDER BY d
             """, (start.isoformat(), end.isoformat()))
             rows = dict(cur.fetchall())
@@ -1200,98 +1199,110 @@ class RootsApp(MDApp):
 
             ys = [int(rows.get((start + timedelta(days=i)).isoformat(), 0)) // 60 for i in range(7)]
             week_days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+
             total_minutes = sum(ys)
             max_minutes = max(ys) if ys else 0
             min_minutes = min(ys) if ys else 0
-            most_productive_day = week_days[ys.index(max_minutes)] if total_minutes > 0 and ys else "Nenhum"
-            least_productive_day = week_days[ys.index(min_minutes)] if total_minutes > 0 and ys else "Nenhum"
+            most_productive_day = week_days[ys.index(max_minutes)] if total_minutes > 0 else "Nenhum"
+            least_productive_day = week_days[ys.index(min_minutes)] if total_minutes > 0 else "Nenhum"
 
-            # --- PARTE 2: Criar o widget de compartilhamento (fora da tela) ---
-            # O tamanho deve ser ajustado para o conteúdo e não para a tela inteira
-            # Ajustamos o padding e spacing para um visual mais limpo na imagem
+            xs = list(range(7))
+            media = sum(ys) / 7.0 if ys else 0.0
+
+            # --- PARTE 2: Container ---
             share_container = MDBoxLayout(
                 orientation='vertical',
                 size_hint=(None, None),
-                size=(dp(700), dp(800)), # Tamanho otimizado para a imagem
-                padding=(dp(40), dp(40), dp(40), dp(40)), # Padding maior para as bordas
+                size=(dp(700), dp(800)),
+                padding=(dp(40), dp(40), dp(40), dp(40)),
                 spacing=dp(15),
-                md_bg_color=(0, 0, 0, 0) # Fundo transparente
+                md_bg_color=(0, 0, 0, 0)
             )
 
-            # Título principal da imagem
             share_container.add_widget(MDLabel(
                 text="Meu Resumo da Semana no Roots", 
-                font_style="H5", # Fonte um pouco maior para destaque
+                font_style="H5",
                 adaptive_height=True,
                 halign='center',
-                color=(1, 1, 1, 1) # Cor branca para ser visível em qualquer fundo
+                color=(1, 1, 1, 1)
             ))
 
-            # Espaçamento
             share_container.add_widget(MDBoxLayout(size_hint_y=None, height=dp(20)))
 
-            # Subtítulo do gráfico
             share_container.add_widget(MDLabel(
                 text="Tempo de leitura (min) — semana atual (Dom->Sáb)",
                 halign="center", 
                 size_hint_y=None, 
                 height=dp(24), 
                 bold=True,
-                color=(1, 1, 1, 1) # Cor branca para ser visível em qualquer fundo
+                color=(1, 1, 1, 1)
             ))
 
-            # Cria e adiciona o gráfico
+            # --- Gráfico ---
             graph = Graph(
                 xlabel='Dias',
                 ylabel='Minutos',
                 x_ticks_minor=0,
-                y_ticks_major=30, 
+                x_ticks_major=1,
+                y_ticks_major=30,
                 y_grid_label=True,
-                x_grid=True, 
-                y_grid=True,
-                xmin=-0.5, 
-                xmax=6.5,
-                ymin=0, 
-                ymax=120,
-                size_hint=(1, None), 
-                height=dp(300), # Altura ajustada para a imagem
-                padding=dp(5), # Padding interno do gráfico
-                background_color=(0,0,0,0), # Fundo do gráfico transparente
-                border_color=(1, 1, 1, 1), # Cor da borda do gráfico (branco)
-                tick_color=(1, 1, 1, 1), # Cor dos ticks (branco)
-                label_options={'color': (1, 1, 1, 1)}, # Cor dos rótulos (branco)
-                x_grid_label=True # Garante que os rótulos do eixo X sejam desenhados
+                x_grid=True, y_grid=True,
+                xmin=-0.5, xmax=6.5,
+                ymin=0, ymax=120,
+                size_hint=(1, None),
+                height=dp(300),
+                padding=dp(5),
+                background_color=(0,0,0,0),
+                border_color=(1, 1, 1, 1),
+                tick_color=(1, 1, 1, 1),
+                label_options={'color': (1, 1, 1, 1)},
+                x_grid_label=True
             )
 
-            graph.x_ticks_major = 1  
-            graph.x_labels = [week_days[i] for i in range(7)] 
+            # Aqui ficam só os dias da semana no eixo X
+            graph.x_labels = week_days  
 
             bar_plot = MeshStemPlot(color=self.theme_cls.primary_color)
-            bar_plot.points = list(zip(range(7), ys))
+            bar_plot.points = list(zip(xs, ys))
             graph.add_plot(bar_plot)
 
-            media = sum(ys) / 7.0 if ys else 0.0
-            avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7]) # Linha da média (vermelha)
-            avg_plot.points = [(x, media) for x in range(7)]
+            avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7])
+            avg_plot.points = [(x, media) for x in xs]
             graph.add_plot(avg_plot)
 
             share_container.add_widget(graph)
 
-            # Média abaixo do gráfico
+            # Legenda dos dias (abaixo do gráfico)
+            day_labels_layout = MDBoxLayout(
+                orientation='horizontal',
+                size_hint_y=None,
+                height=dp(22),
+                spacing=dp(5),
+                padding=(dp(80), 0, dp(20), 0)
+            )
+            
+            for d in week_days:
+                day_labels_layout.add_widget(MDLabel(
+                    text=d,
+                    halign="center",
+                    theme_text_color="Custom",
+                    text_color=(1, 1, 1, 1),
+                    font_size="12sp",
+                ))
+            share_container.add_widget(day_labels_layout)
+
+            # Média
             share_container.add_widget(MDLabel(
                 text=f"Média: {media:.1f} min/dia",
                 halign="center",
                 size_hint_y=None,
                 height=dp(22),
-                color=(1, 1, 1, 1) # Cor branca para ser visível
+                color=(1, 1, 1, 1)
             ))
 
-            # Espaçamento
-            share_container.add_widget(MDBoxLayout(size_hint_y=None, height=dp(20)))
-
-            # Estatísticas detalhadas
+            # Estatísticas
             stats_text = (
-                f"Total de minutos lidos na semana: [b]{total_minutes}[/b]\n\n"
+                f"Total de minutos lidos: [b]{total_minutes}[/b]\n\n"
                 f"Dia mais produtivo: [b]{most_productive_day}[/b] ({max_minutes} min)\n\n"
                 f"Dia com menor leitura: [b]{least_productive_day}[/b] ({min_minutes} min)"
             )
@@ -1300,37 +1311,29 @@ class RootsApp(MDApp):
                 markup=True, 
                 halign='center',
                 adaptive_height=True,
-                color=(1, 1, 1, 1) # Cor branca para ser visível
+                color=(1, 1, 1, 1)
             ))
 
-            # --- PARTE 3: Exportar e compartilhar ---
-            # A exportação deve ser feita após o widget ser desenhado na Window
+            # --- PARTE 3: Exportar ---
             def export_and_cleanup(*args):
                 filepath = os.path.join(self.user_data_dir, "resumo_roots.png")
-                # Garante que o fundo seja transparente ao salvar
                 share_container.export_to_png(filepath)
-                
                 Window.remove_widget(share_container)
-                
-                # Abre a pasta onde a imagem foi salva
+
                 if platform == 'android':
-                    # No Android, o ideal é usar uma Intent para abrir a galeria ou o compartilhamento direto
-                    # Como não temos plyer.share, vamos apenas notificar e o usuário pode ir na galeria
                     self.notify("Imagem salva na galeria! Procure por 'resumo_roots.png'.")
                 else:
-                    # Para desktop, abre a pasta
                     folder_path = os.path.dirname(filepath)
                     webbrowser.open(f"file:///{folder_path}")
                     self.notify("Imagem salva! Escolha na galeria para compartilhar.")
 
-            # Adiciona o container à Window para que ele seja renderizado
             Window.add_widget(share_container)
-            # Agenda a exportação para o próximo frame, garantindo que o widget seja desenhado
+            share_container.do_layout()
+            share_container.canvas.ask_update()
             Clock.schedule_once(export_and_cleanup, 0.2)
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            import traceback; traceback.print_exc()
             self.notify("Ocorreu um erro ao gerar a imagem.")
 
 if __name__ == "__main__":
