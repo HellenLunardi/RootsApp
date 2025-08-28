@@ -168,14 +168,17 @@ ScreenManager:
 <GraphScreen>:
     name: "graph_screen"
     MDBoxLayout:
+        id: graph_layout_container
         orientation: "vertical"
         md_bg_color: app.APP_BG_COLOR
-
+        
         MDTopAppBar:
             title: "Gráfico — Tempo de leitura"
             anchor_title: "center"
             elevation: 4
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
+            right_action_items: [["share-variant", lambda *args: app.share_weekly_summary()]]
+
 
         ScrollView:
             MDBoxLayout:

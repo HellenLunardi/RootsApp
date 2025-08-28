@@ -2,6 +2,7 @@ import sqlite3
 import os.path
 import re
 import html
+import webbrowser
 from datetime import date, timedelta, datetime
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.clock import Clock
@@ -25,6 +26,12 @@ from kivy.resources import resource_add_path
 from kivy.core.window import Window
 from kivymd.uix.menu import MDDropdownMenu
 from kivy.utils import get_color_from_hex
+from kivymd.uix.card import MDSeparator
+from kivy.uix.relativelayout import RelativeLayout
+from kivy.core.window import Window
+from kivy.utils import platform
+from kivymd.uix.label import MDLabel
+
 
 # ---------- Graph (kivy-garden.graph) ----------
 try:
@@ -1159,6 +1166,35 @@ class RootsApp(MDApp):
         if self.root.current == 'graph_screen':
             self.render_time_chart()
 
+    #========== COMPARTILHAMENTO DO GRÁFICO =============
 
+    def share_weekly_summary(self):
+        """
+        Exporta o layout visível da tela de gráficos como uma imagem PNG
+        e abre o gerenciador de arquivos para o usuário compartilhar.
+        """
+        try:
+            # 1. Pega a tela de gráficos atual
+            graph_screen = self.root.get_screen('graph_screen')
+            
+            # 2. Pega o container principal da tela pelo ID que definimos no .kv
+            widget_to_export = graph_screen.ids.graph_layout_container
+            
+            # 3. Define o caminho do arquivo
+            filepath = os.path.join(self.user_data_dir, "resumo_semanal.png")
+            
+            # 4. Exporta o widget diretamente para o arquivo PNG
+            widget_to_export.export_to_png(filepath)
+            
+            # 5. Abre a pasta onde a imagem foi salva
+            folder_path = os.path.dirname(filepath)
+            webbrowser.open(f"file:///{folder_path}")
+            
+            self.notify("Imagem salva! Escolha na galeria para compartilhar.")
+
+        except Exception as e:
+            print(f"Erro ao criar imagem para compartilhar: {e}")
+            self.notify("Ocorreu um erro ao gerar a imagem.")
+            
 if __name__ == "__main__":
     RootsApp().run()
