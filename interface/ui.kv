@@ -168,7 +168,6 @@ ScreenManager:
 <GraphScreen>:
     name: "graph_screen"
     MDBoxLayout:
-        id: graph_layout_container
         orientation: "vertical"
         md_bg_color: app.APP_BG_COLOR
         
@@ -188,6 +187,11 @@ ScreenManager:
                 height: self.minimum_height
                 spacing: dp(8)
                 padding: dp(16), dp(12)
+
+                MDBoxLayout:
+                    id: graph_and_labels_container
+                    orientation: 'vertical'
+                    adaptive_height: True
 
 
 # -----------------------

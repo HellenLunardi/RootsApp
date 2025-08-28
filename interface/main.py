@@ -31,6 +31,8 @@ from kivy.uix.relativelayout import RelativeLayout
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivymd.uix.label import MDLabel
+from PIL import Image, ImageDraw, ImageFont
+
 
 
 # ---------- Graph (kivy-garden.graph) ----------
@@ -1170,31 +1172,166 @@ class RootsApp(MDApp):
 
     def share_weekly_summary(self):
         """
-        Exporta o layout visível da tela de gráficos como uma imagem PNG
-        e abre o gerenciador de arquivos para o usuário compartilhar.
+        Cria uma imagem de compartilhamento no estilo Strava, com fundo transparente.
         """
+        from PIL import Image, ImageDraw, ImageFont
+        import webbrowser
+        from kivy.core.window import Window
+        from kivy.clock import Clock
+        from kivy.metrics import dp
+        from kivymd.uix.boxlayout import MDBoxLayout
+        from kivymd.uix.label import MDLabel
+        from kivymd.uix.card import MDSeparator
+        from kivy_garden.graph import Graph, MeshLinePlot, MeshStemPlot
+
         try:
-            # 1. Pega a tela de gráficos atual
-            graph_screen = self.root.get_screen('graph_screen')
-            
-            # 2. Pega o container principal da tela pelo ID que definimos no .kv
-            widget_to_export = graph_screen.ids.graph_layout_container
-            
-            # 3. Define o caminho do arquivo
-            filepath = os.path.join(self.user_data_dir, "resumo_semanal.png")
-            
-            # 4. Exporta o widget diretamente para o arquivo PNG
-            widget_to_export.export_to_png(filepath)
-            
-            # 5. Abre a pasta onde a imagem foi salva
-            folder_path = os.path.dirname(filepath)
-            webbrowser.open(f"file:///{folder_path}")
-            
-            self.notify("Imagem salva! Escolha na galeria para compartilhar.")
+            # --- PARTE 1: Coletar os dados ---
+            start, end = self._week_range_sun_sat()
+            db_path = os.path.join(self.user_data_dir, "db", "roots.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT date(COALESCE(dia, inicio)) AS d, SUM(COALESCE(duracao_seg, 0)) AS segs
+                FROM sessoes_leitura WHERE date(COALESCE(dia, inicio)) BETWEEN ? AND ?
+                GROUP BY date(COALESCE(dia, inicio)) ORDER BY d
+            """, (start.isoformat(), end.isoformat()))
+            rows = dict(cur.fetchall())
+            conn.close()
+
+            ys = [int(rows.get((start + timedelta(days=i)).isoformat(), 0)) // 60 for i in range(7)]
+            week_days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+            total_minutes = sum(ys)
+            max_minutes = max(ys) if ys else 0
+            min_minutes = min(ys) if ys else 0
+            most_productive_day = week_days[ys.index(max_minutes)] if total_minutes > 0 and ys else "Nenhum"
+            least_productive_day = week_days[ys.index(min_minutes)] if total_minutes > 0 and ys else "Nenhum"
+
+            # --- PARTE 2: Criar o widget de compartilhamento (fora da tela) ---
+            # O tamanho deve ser ajustado para o conteúdo e não para a tela inteira
+            # Ajustamos o padding e spacing para um visual mais limpo na imagem
+            share_container = MDBoxLayout(
+                orientation='vertical',
+                size_hint=(None, None),
+                size=(dp(700), dp(800)), # Tamanho otimizado para a imagem
+                padding=(dp(40), dp(40), dp(40), dp(40)), # Padding maior para as bordas
+                spacing=dp(15),
+                md_bg_color=(0, 0, 0, 0) # Fundo transparente
+            )
+
+            # Título principal da imagem
+            share_container.add_widget(MDLabel(
+                text="Meu Resumo da Semana no Roots", 
+                font_style="H5", # Fonte um pouco maior para destaque
+                adaptive_height=True,
+                halign='center',
+                color=(1, 1, 1, 1) # Cor branca para ser visível em qualquer fundo
+            ))
+
+            # Espaçamento
+            share_container.add_widget(MDBoxLayout(size_hint_y=None, height=dp(20)))
+
+            # Subtítulo do gráfico
+            share_container.add_widget(MDLabel(
+                text="Tempo de leitura (min) — semana atual (Dom->Sáb)",
+                halign="center", 
+                size_hint_y=None, 
+                height=dp(24), 
+                bold=True,
+                color=(1, 1, 1, 1) # Cor branca para ser visível em qualquer fundo
+            ))
+
+            # Cria e adiciona o gráfico
+            graph = Graph(
+                xlabel='Dias',
+                ylabel='Minutos',
+                x_ticks_minor=0,
+                y_ticks_major=30, 
+                y_grid_label=True,
+                x_grid=True, 
+                y_grid=True,
+                xmin=-0.5, 
+                xmax=6.5,
+                ymin=0, 
+                ymax=120,
+                size_hint=(1, None), 
+                height=dp(300), # Altura ajustada para a imagem
+                padding=dp(5), # Padding interno do gráfico
+                background_color=(0,0,0,0), # Fundo do gráfico transparente
+                border_color=(1, 1, 1, 1), # Cor da borda do gráfico (branco)
+                tick_color=(1, 1, 1, 1), # Cor dos ticks (branco)
+                label_options={'color': (1, 1, 1, 1)}, # Cor dos rótulos (branco)
+                x_grid_label=True # Garante que os rótulos do eixo X sejam desenhados
+            )
+
+            graph.x_ticks_major = 1  
+            graph.x_labels = [week_days[i] for i in range(7)] 
+
+            bar_plot = MeshStemPlot(color=self.theme_cls.primary_color)
+            bar_plot.points = list(zip(range(7), ys))
+            graph.add_plot(bar_plot)
+
+            media = sum(ys) / 7.0 if ys else 0.0
+            avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7]) # Linha da média (vermelha)
+            avg_plot.points = [(x, media) for x in range(7)]
+            graph.add_plot(avg_plot)
+
+            share_container.add_widget(graph)
+
+            # Média abaixo do gráfico
+            share_container.add_widget(MDLabel(
+                text=f"Média: {media:.1f} min/dia",
+                halign="center",
+                size_hint_y=None,
+                height=dp(22),
+                color=(1, 1, 1, 1) # Cor branca para ser visível
+            ))
+
+            # Espaçamento
+            share_container.add_widget(MDBoxLayout(size_hint_y=None, height=dp(20)))
+
+            # Estatísticas detalhadas
+            stats_text = (
+                f"Total de minutos lidos na semana: [b]{total_minutes}[/b]\n\n"
+                f"Dia mais produtivo: [b]{most_productive_day}[/b] ({max_minutes} min)\n\n"
+                f"Dia com menor leitura: [b]{least_productive_day}[/b] ({min_minutes} min)"
+            )
+            share_container.add_widget(MDLabel(
+                text=stats_text, 
+                markup=True, 
+                halign='center',
+                adaptive_height=True,
+                color=(1, 1, 1, 1) # Cor branca para ser visível
+            ))
+
+            # --- PARTE 3: Exportar e compartilhar ---
+            # A exportação deve ser feita após o widget ser desenhado na Window
+            def export_and_cleanup(*args):
+                filepath = os.path.join(self.user_data_dir, "resumo_roots.png")
+                # Garante que o fundo seja transparente ao salvar
+                share_container.export_to_png(filepath)
+                
+                Window.remove_widget(share_container)
+                
+                # Abre a pasta onde a imagem foi salva
+                if platform == 'android':
+                    # No Android, o ideal é usar uma Intent para abrir a galeria ou o compartilhamento direto
+                    # Como não temos plyer.share, vamos apenas notificar e o usuário pode ir na galeria
+                    self.notify("Imagem salva na galeria! Procure por 'resumo_roots.png'.")
+                else:
+                    # Para desktop, abre a pasta
+                    folder_path = os.path.dirname(filepath)
+                    webbrowser.open(f"file:///{folder_path}")
+                    self.notify("Imagem salva! Escolha na galeria para compartilhar.")
+
+            # Adiciona o container à Window para que ele seja renderizado
+            Window.add_widget(share_container)
+            # Agenda a exportação para o próximo frame, garantindo que o widget seja desenhado
+            Clock.schedule_once(export_and_cleanup, 0.2)
 
         except Exception as e:
-            print(f"Erro ao criar imagem para compartilhar: {e}")
+            import traceback
+            traceback.print_exc()
             self.notify("Ocorreu um erro ao gerar a imagem.")
-            
+
 if __name__ == "__main__":
     RootsApp().run()
