@@ -258,33 +258,41 @@ ScreenManager:
             elevation: 4
             left_action_items: [["arrow-left", lambda x: app.go_home()]]
 
-        MDBoxLayout:
-            orientation: "vertical"
-            spacing: dp(20)
-            padding: dp(30)
+        # Relógio central
+        MDLabel:
+            id: timer_label
+            text: "00:00:00"
+            halign: "center"
+            font_style: "H3"
+            theme_text_color: "Custom"
+            text_color: get_color_from_hex("#f9ebd7")
 
-            MDLabel:
-                id: timer_label
-                text: "00:00:00"
-                halign: "center"
-                font_style: "H3"
-                theme_text_color: "Custom"
-                text_color: get_color_from_hex("#f9ebd7")
+        # Linha de botões
+        MDBoxLayout:
+            orientation: "horizontal"
+            spacing: dp(20)
+            padding: dp(60)
+            size_hint: (None, None)
+            height: dp(60)
+            width: self.minimum_width
+            pos_hint: {"center_x": 0.5}
 
             MDRaisedButton:
                 text: "Iniciar"
-                pos_hint: {"center_x": 0.5}
                 on_release: app.start_timer()
 
             MDRaisedButton:
-                text: "Parar"
-                pos_hint: {"center_x": 0.5}
-                on_release: app.stop_timer()
+                text: "Pausar"
+                on_release: app.pause_timer()
+
+            MDRaisedButton:
+                text: "Zerar"
+                on_release: app.reset_timer()
 
             MDRaisedButton:
                 text: "Salvar tempo"
-                pos_hint: {"center_x": 0.5}
                 on_release: app.save_timer()
+
 
 
 # -----------------------

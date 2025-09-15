@@ -33,8 +33,6 @@ from kivy.utils import platform
 from kivymd.uix.label import MDLabel
 from PIL import Image, ImageDraw, ImageFont
 
-
-
 # ---------- Graph (kivy-garden.graph) ----------
 try:
     # Agora importamos também o MeshStemPlot para "barras"
@@ -43,7 +41,6 @@ try:
 except Exception:
     HAS_GRAPH = False
 
-
 # ===================== SCREENS =====================
 class NoteDetailScreen(Screen):
     note_id = NumericProperty(0)
@@ -51,13 +48,11 @@ class NoteDetailScreen(Screen):
     book_title = StringProperty("")
     note_text = StringProperty("")
 
-
 class NoteEditorScreen(Screen):
     note_id = NumericProperty(0)   # 0 = nova
     book_id = StringProperty("")
     book_title = StringProperty("")
     note_text = StringProperty("")
-
 
 class BookItem(ButtonBehavior, MDBoxLayout):
     title = StringProperty('')
@@ -68,23 +63,18 @@ class BookItem(ButtonBehavior, MDBoxLayout):
     description = StringProperty('')
     removable = BooleanProperty(False)
 
-
 class MainScreen(Screen):
     show_back = BooleanProperty(False)
 
-
 class GraphScreen(Screen):
     pass
-
 
 class NotesScreen(Screen):
     notes_book_id = StringProperty("")
     notes_book_title = StringProperty("Selecionar livro")
 
-
 class TimerScreen(Screen):
     pass
-
 
 class BookDetailScreen(Screen):
     book_id = StringProperty('')
@@ -97,7 +87,6 @@ class BookDetailScreen(Screen):
     pages_read = NumericProperty(0)
     book_status = StringProperty('Quero ler')
     progress_percent = NumericProperty(0)
-
 
 # ===================== APP =====================
 class RootsApp(MDApp):
@@ -129,7 +118,6 @@ class RootsApp(MDApp):
             except Exception:
                 pass
             self._status_menu = None
-
 
     # ------------------ FONTS ------------------
     def _register_fonts(self):
@@ -619,7 +607,7 @@ class RootsApp(MDApp):
 
 
         try:
-            bar_plot = MeshStemPlot(color=self.theme_cls.primary_color)
+            bar_plot = MeshStemPlot(color=[1, 1, 1, 1])
             bar_plot.points = list(zip(xs, ys))
             graph.add_plot(bar_plot)
         except Exception:
@@ -628,7 +616,7 @@ class RootsApp(MDApp):
             graph.add_plot(line_fallback)
 
         media = sum(ys) / 7.0 if ys else 0.0
-        avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7])
+        avg_plot = MeshLinePlot(color=[1, 0, 0, 1])
         avg_plot.points = [(x, media) for x in xs]
         graph.add_plot(avg_plot)
 
@@ -1082,6 +1070,7 @@ class RootsApp(MDApp):
     _timer_event = None
     _timer_running = False
     _timer_start_ts = 0
+    _elapsed_paused = 0
 
     def _fmt_hhmmss(self, secs: int) -> str:
         secs = max(0, int(secs))
@@ -1090,32 +1079,35 @@ class RootsApp(MDApp):
         s = secs % 60
         return f"{h:02d}:{m:02d}:{s:02d}"
 
-    def start_timer(self):
+    def start_or_resume_timer(self):
+        """Usa um único botão: iniciar do zero OU retomar se estiver pausado."""
         if self._timer_running:
             return
-        self._timer_running = True
         from time import time
         self._timer_start_ts = int(time())
+        self._timer_running = True
         if self._timer_event:
-            try:
-                self._timer_event.cancel()
-            except Exception:
-                pass
+            try: self._timer_event.cancel()
+            except Exception: pass
         self._timer_event = Clock.schedule_interval(self._tick_timer, 1)
-        self.notify("Cronômetro iniciado.")
+        self.notify("Cronômetro retomado." if (self._elapsed_paused or 0) > 0 else "Cronômetro iniciado.")
+
+    start_timer  = start_or_resume_timer
+    resume_timer = start_or_resume_timer
 
     def _tick_timer(self, dt):
-        try:
-            from time import time
-            elapsed = int(time()) - int(self._timer_start_ts or 0)
-            ts = self.root.get_screen('timer_screen')
-            ts.ids.timer_label.text = self._fmt_hhmmss(elapsed)
-        except Exception:
-            pass
+        from time import time
+        elapsed = (int(time()) - int(self._timer_start_ts or 0)) + int(self._elapsed_paused or 0)
+        ts = self.root.get_screen('timer_screen')
+        ts.ids.timer_label.text = self._fmt_hhmmss(elapsed)
 
-    def stop_timer(self):
+    def pause_timer(self):
+        """Pausa mas não zera"""
         if not self._timer_running:
             return
+        from time import time
+        # salva tempo acumulado
+        self._elapsed_paused += int(time()) - int(self._timer_start_ts or 0)
         self._timer_running = False
         if self._timer_event:
             try:
@@ -1123,7 +1115,22 @@ class RootsApp(MDApp):
             except Exception:
                 pass
             self._timer_event = None
-        self.notify("Cronômetro parado.")
+        self.notify("Cronômetro pausado.")
+
+
+    def reset_timer(self):
+        """Reseta sem salvar"""
+        if self._timer_event:
+            try:
+                self._timer_event.cancel()
+            except Exception:
+                pass
+            self._timer_event = None
+        self._timer_running = False
+        self._elapsed_paused = 0
+        ts = self.root.get_screen('timer_screen')
+        ts.ids.timer_label.text = "00:00:00"
+        self.notify("Cronômetro zerado.")
 
     def save_timer(self):
         """Salva a sessão do cronômetro em sessoes_leitura e atualiza o gráfico se estiver na aba."""
@@ -1238,7 +1245,7 @@ class RootsApp(MDApp):
                 color=(1, 1, 1, 1)
             ))
 
-            # --- Gráfico ---
+            # ------------- Gráfico --------------
             graph = Graph(
                 xlabel='Dias',
                 ylabel='Minutos',
@@ -1262,11 +1269,11 @@ class RootsApp(MDApp):
             # Aqui ficam só os dias da semana no eixo X
             graph.x_labels = week_days  
 
-            bar_plot = MeshStemPlot(color=self.theme_cls.primary_color)
+            bar_plot = MeshStemPlot(color=[1, 1, 1, 1])
             bar_plot.points = list(zip(xs, ys))
             graph.add_plot(bar_plot)
 
-            avg_plot = MeshLinePlot(color=[1, 0, 0, 0.7])
+            avg_plot = MeshLinePlot(color=[1, 0, 0, 1])
             avg_plot.points = [(x, media) for x in xs]
             graph.add_plot(avg_plot)
 
